@@ -98,17 +98,22 @@ export async function chat(
   config: LLMConfig,
   messages: ChatMessage[],
   opts?: CallOptions & { tools?: ToolSpec[] },
-): Promise<{ content: string | null; toolCalls: ToolCall[] }> {
+): Promise<{ content: string | null; toolCalls: ToolCall[]; reasoning: string }> {
   let content = "";
+  let reasoning = "";
   let toolCalls: ToolCall[] = [];
   for await (const ev of streamTurn(config, messages, opts)) {
     if (ev.type === "text") content += ev.delta;
+    else if (ev.type === "reasoning") reasoning += ev.delta;
     else toolCalls = ev.toolCalls;
   }
-  return { content: content || null, toolCalls };
+  return { content: content || null, toolCalls, reasoning };
 }
 
-export type StreamEvent = { type: "text"; delta: string } | { type: "tool_calls"; toolCalls: ToolCall[] };
+export type StreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "reasoning"; delta: string }
+  | { type: "tool_calls"; toolCalls: ToolCall[] };
 
 /**
  * 流式调用（GM 用）：一次补全里正文与工具调用共存——
@@ -133,6 +138,15 @@ export async function* streamTurn(
       const choice = chunk.choices[0];
       const delta = choice?.delta;
       if (delta?.content) yield { type: "text", delta: delta.content };
+      // 思维链：DeepSeek/中转惯例的 reasoning_content（部分端点用 reasoning），SDK 无此类型
+      const ext = delta as { reasoning_content?: unknown; reasoning?: unknown } | undefined;
+      const r =
+        typeof ext?.reasoning_content === "string"
+          ? ext.reasoning_content
+          : typeof ext?.reasoning === "string"
+            ? ext.reasoning
+            : "";
+      if (r) yield { type: "reasoning", delta: r };
       for (const tc of delta?.tool_calls ?? []) {
         const slot = acc.get(tc.index) ?? { id: "", name: "", arguments: "" };
         if (tc.id) slot.id = tc.id;

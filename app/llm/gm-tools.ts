@@ -1,5 +1,5 @@
 import type { AgentTool } from "./agent";
-import type { Checkpoint, Contradiction, ContradictionMagnitude, GmState } from "./types";
+import type { Checkpoint, Contradiction, ContradictionMagnitude, GmDebugEvent, GmState } from "./types";
 
 /** 矛盾量级档位 → 合法幅度区间（百分点，取绝对值）。restorative 为负方向。 */
 const TIER_RANGES: Record<string, [number, number]> = {
@@ -129,8 +129,36 @@ export function createGmTools(
   gm: GmInternals,
   /** present_options 调用后挂起等待的来源：玩家的行动文本（人或 agent 提供） */
   requestInput: (options: string[]) => Promise<string>,
+  /** 调试事件出口（「展示隐藏状态」模式）：每次工具执行后发出，带执行后状态快照 */
+  notify?: (ev: GmDebugEvent) => void,
 ): AgentTool[] {
-  return [
+  /** 包装工具：执行成功/报错后向 UI 发出工具事件。present_options 的成功事件在挂起前手动发出（挂起即场景边界）。 */
+  const withNotify = (tool: AgentTool): AgentTool => {
+    if (!notify) return tool;
+    return {
+      ...tool,
+      async run(args) {
+        try {
+          const result = await tool.run(args);
+          if (tool.name !== "present_options") {
+            notify({ type: "tool", name: tool.name, args, state: structuredClone(gm.state) });
+          }
+          return result;
+        } catch (e) {
+          notify({
+            type: "tool",
+            name: tool.name,
+            args,
+            state: structuredClone(gm.state),
+            error: e instanceof Error ? e.message : String(e),
+          });
+          throw e;
+        }
+      },
+    };
+  };
+  const tools: AgentTool[] = [
+
     {
       name: "settle",
       description:
@@ -430,6 +458,13 @@ export function createGmTools(
         }
         // 全部校验通过、且玩家已行动之后，才允许改状态——
         // requestInput 抛错（如本幕无正文、玩家中止）时不能留下半变更的死锁状态
+        // 工具事件在挂起前发出：挂起即场景边界，之后发出会错位到下一幕的附注
+        notify?.({
+          type: "tool",
+          name: "present_options",
+          args,
+          state: structuredClone(gm.state),
+        });
         const action = await requestInput(opts.map(String));
         gm.options = opts.map(String);
         gm.settledThisAct = false;
@@ -463,4 +498,5 @@ export function createGmTools(
       },
     },
   ];
+  return tools.map(withNotify);
 }

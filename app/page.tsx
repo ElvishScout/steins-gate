@@ -5,87 +5,29 @@ import { Agent } from "./llm/agent";
 import { GameEngine } from "./llm/engine";
 import { chat } from "./llm/llm";
 import { PLAYER_PROMPT } from "./llm/prompts/gm";
-import type { GameSetup, GmState, LLMConfig, Scene } from "./llm/types";
+import type { Ending, GameSetup, GmDebugEvent, LLMConfig, Scene } from "./llm/types";
+import { EMPTY_CONFIG } from "./components/ConfigForm";
+import { TopBar } from "./components/TopBar";
+import { SettingsDrawer } from "./components/SettingsDrawer";
+import { SetupPanel } from "./components/SetupPanel";
+import { BottomDock } from "./components/BottomDock";
+import { StoryLog, type LiveGM, type LivePlayer } from "./components/StoryLog";
+import type { Entry, Mode } from "./components/entries";
 
-type Entry =
-  | { kind: "scene"; act: number; narration: string; options: string[] }
-  | { kind: "action"; text: string; by: "human" | "player-agent" }
-  | { kind: "ending"; title: string; yearbook: string }
-  | { kind: "error"; text: string };
-
-type Mode = "play" | "spectate";
-
-const EMPTY_CONFIG: LLMConfig = { baseURL: "", apiKey: "", model: "" };
-const LETTERS = ["A", "B", "C", "D"] as const;
-
-/** 观战模式：把场景格式化成发给玩家 agent 的纯文本（不含任何状态）。 */
+/** 观战模式：把场景格式化成发给玩家 agent 的纯文本（不含任何状态；选项不带编号——玩家只输出行动文本）。 */
 function formatScene(s: Scene): string {
-  const opts = s.options.map((o, i) => `${LETTERS[i]}. ${o}`).join("\n");
+  const opts = s.options.map((o) => `· ${o}`).join("\n");
   return `${s.narration}\n\n${opts}\n\n（或者自由输入任何行动。）`;
 }
 
-function loadConfig(key: string): LLMConfig {
+function loadJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return { ...EMPTY_CONFIG, ...JSON.parse(raw) };
+    if (raw) return { ...fallback, ...JSON.parse(raw) };
   } catch {
-    /* localStorage 不可用时用空配置 */
+    /* localStorage 不可用时用回退值 */
   }
-  return EMPTY_CONFIG;
-}
-
-function ConfigForm(props: {
-  label: string;
-  value: LLMConfig;
-  onChange: (c: LLMConfig) => void;
-  onTest: () => void;
-  testing: boolean;
-}) {
-  const { label, value, onChange } = props;
-  const field = (
-    name: keyof LLMConfig,
-    placeholder: string,
-    type = "text",
-  ) => (
-    <input
-      className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 placeholder:text-zinc-600"
-      placeholder={placeholder}
-      type={type}
-      value={(value[name] as string) ?? ""}
-      onChange={(e) => onChange({ ...value, [name]: e.target.value })}
-    />
-  );
-  return (
-    <fieldset className="flex flex-col gap-2 rounded border border-zinc-800 p-3">
-      <legend className="px-1 text-xs text-zinc-400">{label}</legend>
-      {field("baseURL", "baseURL，如 https://你的中转/v1")}
-      {field("apiKey", "apiKey", "password")}
-      {field("model", "model，如 deepseek-chat")}
-      <select
-        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100"
-        value={value.reasoningEffort ?? ""}
-        onChange={(e) =>
-          onChange({
-            ...value,
-            reasoningEffort: (e.target.value || undefined) as LLMConfig["reasoningEffort"],
-          })
-        }
-      >
-        <option value="">reasoning effort：默认（不传）</option>
-        <option value="none">reasoning effort: none</option>
-        <option value="low">reasoning effort: low</option>
-        <option value="medium">reasoning effort: medium</option>
-        <option value="high">reasoning effort: high</option>
-      </select>
-      <button
-        className="self-start rounded bg-zinc-700 px-2 py-1 text-xs hover:bg-zinc-600 disabled:opacity-40"
-        onClick={props.onTest}
-        disabled={props.testing || !value.baseURL || !value.apiKey || !value.model}
-      >
-        {props.testing ? "测试中…" : "测试连接"}
-      </button>
-    </fieldset>
-  );
+  return fallback;
 }
 
 export default function Home() {
@@ -95,34 +37,41 @@ export default function Home() {
   const [genre, setGenre] = useState("");
   const [protagonist, setProtagonist] = useState("");
   const [difficulty, setDifficulty] = useState<GameSetup["difficulty"]>("standard");
+  const [showHidden, setShowHidden] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [streaming, setStreaming] = useState<string | null>(null);
+  const [live, setLive] = useState<LiveGM | null>(null);
+  const [playerLive, setPlayerLive] = useState<LivePlayer | null>(null);
   const [busy, setBusy] = useState(false);
   const [waitingInput, setWaitingInput] = useState(false);
-  const [freeInput, setFreeInput] = useState("");
+  const [gameOver, setGameOver] = useState(false);
+  /** 被主动停止（区别于自然终局）：顶栏显示「重新开始」，点了才回初始面板 */
+  const [stopped, setStopped] = useState(false);
   const [testingGm, setTestingGm] = useState(false);
   const [testingPlayer, setTestingPlayer] = useState(false);
-  const [gmState, setGmState] = useState<GmState | null>(null);
-  const [gameOver, setGameOver] = useState(false);
 
   const engineRef = useRef<GameEngine | null>(null);
   const inputResolverRef = useRef<((action: string) => void) | null>(null);
-  const logRef = useRef<HTMLDivElement>(null);
+  /** 流式累加的真源（setLive 只是它的快照）：归档进条目时从这里取 */
+  const liveRef = useRef<{ narration: string; events: GmDebugEvent[] }>({
+    narration: "",
+    events: [],
+  });
+  const endingRef = useRef<Ending | null>(null);
 
   useEffect(() => {
     // localStorage 只在客户端可用，必须在挂载后读取（SSR 时没有 window）
+    const gm = loadJSON("sg:gm", EMPTY_CONFIG);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setGmConfig(loadConfig("sg:gm"));
-    setPlayerConfig(loadConfig("sg:player"));
+    setGmConfig(gm);
+    setPlayerConfig(loadJSON("sg:player", EMPTY_CONFIG));
+    // 「展示隐藏状态」不持久化：每次进页面默认关闭，防止意外剧透
+    if (!gm.baseURL) setDrawerOpen(true);
   }, []);
 
-  useEffect(() => {
-    logRef.current?.scrollTo(0, logRef.current.scrollHeight);
-  }, [entries, streaming]);
-
-  const saveConfig = (key: string, c: LLMConfig) => {
+  const save = (key: string, v: unknown) => {
     try {
-      localStorage.setItem(key, JSON.stringify(c));
+      localStorage.setItem(key, JSON.stringify(v));
     } catch {
       /* ignore */
     }
@@ -142,11 +91,56 @@ export default function Home() {
 
   const pushEntry = (e: Entry) => setEntries((prev) => [...prev, e]);
 
+  /** 把流式真源同步到 React state（每次增量一个新快照） */
+  const syncLive = () => setLive({ ...liveRef.current, events: [...liveRef.current.events] });
+
+  /** 归档当前流式缓冲区，返回其中的调试事件（附注：产出侧归属） */
+  const drainLive = (): GmDebugEvent[] => {
+    const events = liveRef.current.events;
+    liveRef.current = { narration: "", events: [] };
+    setLive(null);
+    return events;
+  };
+
+  /** 观战模式：玩家 agent 行动（正文与思维链双流式），回复入流并附上思维链 */
+  const runPlayer = async (player: Agent, input: string): Promise<string> => {
+    setPlayerLive({ text: "", reasoning: "" });
+    let reasoning = "";
+    const action = await player.step(input, {
+      onText: (d) => setPlayerLive((prev) => (prev ? { ...prev, text: prev.text + d } : prev)),
+      onReasoning: (d) => {
+        reasoning += d;
+        setPlayerLive((prev) => (prev ? { ...prev, reasoning: prev.reasoning + d } : prev));
+      },
+    });
+    setPlayerLive(null);
+    pushEntry({
+      kind: "action",
+      text: action,
+      by: "player-agent",
+      // 无思维链则不展示附注（直接没有，不留占位）
+      ...(reasoning
+        ? { debug: { events: [{ type: "reasoning" as const, text: reasoning }], state: null } }
+        : {}),
+    });
+    return action;
+  };
+
+  const canStart =
+    !!gmConfig.baseURL &&
+    !!gmConfig.apiKey &&
+    !!gmConfig.model &&
+    (mode === "play" || (!!playerConfig.baseURL && !!playerConfig.apiKey && !!playerConfig.model));
+
   const startGame = async () => {
     setBusy(true);
     setEntries([]);
     setGameOver(false);
-    setGmState(null);
+    setStopped(false);
+    setDrawerOpen(false); // 开局即收起抽屉，屏幕让给故事
+    liveRef.current = { narration: "", events: [] };
+    setLive(null);
+    setPlayerLive(null);
     const engine = new GameEngine(gmConfig);
     engineRef.current = engine;
     // 观战模式：玩家侧也是一个 agent，由页面持有，作为 onScene 的输入来源
@@ -154,31 +148,56 @@ export default function Home() {
     const setup: GameSetup = { genre, protagonist, difficulty };
     try {
       await engine.play(setup, {
-        onChunk: (t) => setStreaming((prev) => (prev ?? "") + t),
+        onChunk: (d) => {
+          liveRef.current.narration += d;
+          syncLive();
+        },
+        onDebug: (ev) => {
+          const evs = liveRef.current.events;
+          const last = evs[evs.length - 1];
+          // 连续的思维链增量合并成一段（否则每个 token 渲染成一行）；工具事件天然分段
+          if (ev.type === "reasoning" && last?.type === "reasoning") last.text += ev.text;
+          else evs.push(ev);
+          syncLive();
+        },
         onScene: async (scene) => {
-          setStreaming(null);
-          setGmState(scene.state);
-          pushEntry({ kind: "scene", act: scene.act, narration: scene.narration, options: scene.options });
-          if (player) {
-            const action = await player.step(formatScene(scene));
-            pushEntry({ kind: "action", text: action, by: "player-agent" });
-            return action;
-          }
+          pushEntry({
+            kind: "scene",
+            act: scene.act,
+            narration: scene.narration,
+            options: scene.options,
+            debug: { events: drainLive(), state: scene.state },
+          });
+          if (player) return runPlayer(player, formatScene(scene));
           // 人类玩家：挂起直到 act() 投递输入
           setWaitingInput(true);
           return new Promise<string>((resolve) => {
             inputResolverRef.current = resolve;
           });
         },
-        onEnding: (ending, state) => {
-          setStreaming(null);
-          setGmState(state);
+        onEnding: (e, state) => {
           setGameOver(true);
-          pushEntry({ kind: "ending", title: ending.title, yearbook: ending.yearbook });
+          endingRef.current = e;
+          pushEntry({
+            kind: "ending",
+            title: e.title,
+            yearbook: e.yearbook,
+            debug: { events: drainLive(), state },
+          });
         },
       });
+      // play() 静默返回 = 被主动停止（自然终局走 onEnding，异常走 catch）
+      const ended = endingRef.current as Ending | null;
+      if (!ended) setStopped(true);
+      // 复盘链：观战模式下把结局+年鉴喂给玩家 agent，它的复盘入流（PLAYER_PROMPT 的契约）
+      if (player && ended) {
+        await runPlayer(player, `【结局】${ended.title}\n\n${ended.yearbook}`);
+      }
     } catch (e) {
-      setStreaming(null);
+      // 报错时流式残片照旧丢弃
+      setLive(null);
+      setPlayerLive(null);
+      liveRef.current = { narration: "", events: [] };
       pushEntry({ kind: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
@@ -194,175 +213,102 @@ export default function Home() {
     inputResolverRef.current = null;
     setWaitingInput(false);
     pushEntry({ kind: "action", text: action, by: "human" });
-    setStreaming(""); // GM 即将开始输出下一幕
+    liveRef.current = { narration: "", events: [] };
+    setLive({ narration: "", events: [] }); // GM 即将开始输出下一幕
     resolve(action);
   };
 
+  /** 重新开始：清空对局回到初始面板（题材/主角/模式等设置保留，默认填入上一局的） */
+  const restart = () => {
+    engineRef.current?.stop();
+    setEntries([]);
+    setLive(null);
+    setPlayerLive(null);
+    liveRef.current = { narration: "", events: [] };
+    setGameOver(false);
+    setStopped(false);
+    setWaitingInput(false);
+  };
+
   const lastScene = [...entries].reverse().find((e) => e.kind === "scene");
+  const status = busy
+    ? mode === "play" && waitingInput
+      ? `第 ${lastScene?.act ?? "—"} 幕 · 等待你的行动`
+      : "收束中…"
+    : gameOver
+      ? "已终局"
+      : stopped || entries.length > 0
+        ? "已停止"
+        : "";
+  const showCover = entries.length === 0 && !live && !busy && !stopped && !gameOver;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 p-6 text-zinc-100">
-      <h1 className="text-xl font-bold">世界线收束物语</h1>
+    <main className="mx-auto flex h-screen w-full max-w-3xl flex-col gap-3 p-4 text-ink">
+      <TopBar
+        difficulty={difficulty}
+        onDifficulty={setDifficulty}
+        status={status}
+        busy={busy}
+        onStop={() => engineRef.current?.stop()}
+        hasEntries={entries.length > 0 || stopped || gameOver}
+        onRestart={restart}
+        showHidden={showHidden}
+        onShowHidden={setShowHidden}
+        drawerOpen={drawerOpen}
+        onToggleDrawer={() => setDrawerOpen((v) => !v)}
+      />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <ConfigForm
-          label="GM 模型"
-          value={gmConfig}
-          onChange={(c) => { setGmConfig(c); saveConfig("sg:gm", c); }}
-          onTest={() => test(gmConfig, setTestingGm)}
-          testing={testingGm}
+      {drawerOpen && (
+        <SettingsDrawer
+          gmConfig={gmConfig}
+          onGmConfig={(c) => {
+            setGmConfig(c);
+            save("sg:gm", c);
+          }}
+          playerConfig={playerConfig}
+          onPlayerConfig={(c) => {
+            setPlayerConfig(c);
+            save("sg:player", c);
+          }}
+          onTest={(c, which) => test(c, which === "gm" ? setTestingGm : setTestingPlayer)}
+          testingGm={testingGm}
+          testingPlayer={testingPlayer}
         />
-        <ConfigForm
-          label="玩家模型（观战模式用）"
-          value={playerConfig}
-          onChange={(c) => { setPlayerConfig(c); saveConfig("sg:player", c); }}
-          onTest={() => test(playerConfig, setTestingPlayer)}
-          testing={testingPlayer}
-        />
-      </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <label className="flex items-center gap-1">
-          <input type="radio" checked={mode === "play"} onChange={() => setMode("play")} />
-          自己玩
-        </label>
-        <label className="flex items-center gap-1">
-          <input type="radio" checked={mode === "spectate"} onChange={() => setMode("spectate")} />
-          观战（双 agent）
-        </label>
-        <input
-          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 placeholder:text-zinc-600"
-          placeholder="题材（留空随机）"
-          value={genre}
-          onChange={(e) => setGenre(e.target.value)}
-        />
-        <input
-          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 placeholder:text-zinc-600"
-          placeholder="主角（留空代拟）"
-          value={protagonist}
-          onChange={(e) => setProtagonist(e.target.value)}
-        />
-        <select
-          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1"
-          value={difficulty}
-          onChange={(e) => setDifficulty(e.target.value as GameSetup["difficulty"])}
-        >
-          <option value="easy">轻松 · 0.8%</option>
-          <option value="standard">标准 · 1.0%</option>
-          <option value="hard">残酷 · 1.2%</option>
-        </select>
-        <button
-          className="rounded bg-amber-700 px-3 py-1 font-medium hover:bg-amber-600 disabled:opacity-40"
-          onClick={startGame}
-          disabled={busy || !gmConfig.baseURL || (mode === "spectate" && !playerConfig.baseURL)}
-        >
-          {busy ? "进行中…" : "开始"}
-        </button>
-        {busy && (
-          <button
-            className="rounded bg-zinc-700 px-3 py-1 hover:bg-zinc-600"
-            onClick={() => engineRef.current?.stop()}
-          >
-            停止
-          </button>
+      <div className="min-h-0 flex-1">
+        {showCover ? (
+          <SetupPanel
+            mode={mode}
+            onMode={setMode}
+            genre={genre}
+            onGenre={setGenre}
+            protagonist={protagonist}
+            onProtagonist={setProtagonist}
+            canStart={canStart}
+            onStart={startGame}
+            onOpenSettings={() => setDrawerOpen(true)}
+          />
+        ) : (
+          <StoryLog
+            entries={entries}
+            live={live}
+            playerLive={playerLive}
+            showHidden={showHidden}
+          />
         )}
       </div>
 
-      <div
-        ref={logRef}
-        className="flex min-h-96 flex-col gap-4 overflow-y-auto rounded border border-zinc-800 p-4"
-      >
-        {entries.map((e, i) => {
-          if (e.kind === "scene") {
-            return (
-              <section key={i} className="whitespace-pre-wrap leading-relaxed">
-                {e.narration}
-              </section>
-            );
-          }
-          if (e.kind === "action") {
-            return (
-              <section key={i} className="border-l-2 border-amber-700 pl-3 text-amber-200">
-                <span className="mr-2 text-xs text-zinc-500">
-                  {e.by === "human" ? "你的行动" : "玩家 agent"}
-                </span>
-                {e.text}
-              </section>
-            );
-          }
-          if (e.kind === "ending") {
-            return (
-              <section key={i} className="rounded border border-amber-800 bg-amber-950/30 p-3">
-                <h2 className="mb-2 font-bold text-amber-300">{e.title}</h2>
-                <div className="whitespace-pre-wrap text-sm leading-relaxed">{e.yearbook}</div>
-              </section>
-            );
-          }
-          return (
-            <section key={i} className="text-red-400">
-              ⚠ {e.text}
-            </section>
-          );
-        })}
-        {streaming !== null && (
-          <section className="whitespace-pre-wrap leading-relaxed text-zinc-300">
-            {streaming}
-            <span className="animate-pulse">▌</span>
-          </section>
-        )}
-      </div>
-
-      {mode === "play" && waitingInput && !gameOver && lastScene && (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            {lastScene.options.map((o, i) => (
-              <button
-                key={i}
-                className="rounded border border-zinc-700 px-3 py-1 text-sm hover:border-amber-600 hover:text-amber-300"
-                onClick={() => act(o)}
-              >
-                {o}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 placeholder:text-zinc-600"
-              placeholder="或者自由输入任何行动…"
-              value={freeInput}
-              onChange={(e) => setFreeInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && freeInput.trim()) {
-                  act(freeInput.trim());
-                  setFreeInput("");
-                }
-              }}
-            />
-            <button
-              className="rounded bg-zinc-700 px-3 py-1 hover:bg-zinc-600 disabled:opacity-40"
-              disabled={!freeInput.trim()}
-              onClick={() => {
-                act(freeInput.trim());
-                setFreeInput("");
-              }}
-            >
-              发送
-            </button>
-          </div>
-        </div>
-      )}
-
-      {mode === "spectate" && gmState && (
-        <details className="rounded border border-zinc-800 p-3 text-xs text-zinc-400">
-          <summary className="cursor-pointer select-none">
-            GM 隐藏状态（观战者全知视角）——世界线 {gmState.worldline} · 变动率{" "}
-            {gmState.divergence.toFixed(6)}% / 壁垒 {gmState.barrier.toFixed(6)}%
-          </summary>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">
-            {JSON.stringify(gmState, null, 2)}
-          </pre>
-        </details>
-      )}
+      <BottomDock
+        mode={mode}
+        busy={busy}
+        gameOver={gameOver}
+        waitingInput={waitingInput}
+        playerThinking={playerLive !== null}
+        options={lastScene?.options ?? []}
+        onSubmit={act}
+        onRestart={startGame}
+      />
     </main>
   );
 }

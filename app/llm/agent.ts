@@ -1,4 +1,4 @@
-import { chat, streamTurn, type ToolSpec } from "./llm";
+import { streamTurn, type ToolSpec } from "./llm";
 import type { ChatMessage, LLMConfig, ToolCall } from "./types";
 
 export interface AgentTool extends ToolSpec {
@@ -38,6 +38,8 @@ export class Agent {
     opts?: {
       tools?: AgentTool[];
       onChunk?: (delta: string) => void;
+      /** 思维链增量（模型不吐 reasoning 时永不触发）；只进 UI，不回写历史 */
+      onReasoning?: (delta: string) => void;
       signal?: AbortSignal;
       /** 工具调用轮数上限（GM 整局一条循环，要给足；默认 8） */
       maxRounds?: number;
@@ -47,6 +49,7 @@ export class Agent {
   ): Promise<{ text: string; called: string[] }> {
     this.history.push({ role: "user", content: userInput });
     const onChunk = opts?.onChunk ?? noop;
+    const onReasoning = opts?.onReasoning ?? noop;
     const called: string[] = [];
     let fullText = "";
 
@@ -60,6 +63,8 @@ export class Agent {
         if (ev.type === "text") {
           roundText += ev.delta;
           onChunk(ev.delta);
+        } else if (ev.type === "reasoning") {
+          onReasoning(ev.delta);
         } else {
           toolCalls = ev.toolCalls;
         }
@@ -94,11 +99,25 @@ export class Agent {
     return { text: fullText, called };
   }
 
-  /** 纯文本非流式（玩家 agent、连接测试用）。 */
-  async step(userInput: string, opts?: { signal?: AbortSignal }): Promise<string> {
+  /** 一步对话（玩家 agent、连接测试用）。底层走流式，正文/思维链可经回调实时取出。 */
+  async step(
+    userInput: string,
+    opts?: {
+      signal?: AbortSignal;
+      onText?: (delta: string) => void;
+      onReasoning?: (delta: string) => void;
+    },
+  ): Promise<string> {
     this.history.push({ role: "user", content: userInput });
-    const res = await chat(this.config, this.history, opts);
-    const text = res.content ?? "";
+    let text = "";
+    for await (const ev of streamTurn(this.config, this.history, { signal: opts?.signal })) {
+      if (ev.type === "text") {
+        text += ev.delta;
+        opts?.onText?.(ev.delta);
+      } else if (ev.type === "reasoning") {
+        opts?.onReasoning?.(ev.delta);
+      }
+    }
     this.history.push({ role: "assistant", content: text });
     return text;
   }

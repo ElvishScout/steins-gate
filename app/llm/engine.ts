@@ -1,7 +1,7 @@
 import { Agent } from "./agent";
 import { createGmTools, freshInternals, snapshot, type GmInternals } from "./gm-tools";
 import { barrierOf, buildGmPrompt } from "./prompts/gm";
-import type { Ending, GameSetup, GmState, LLMConfig, Scene } from "./types";
+import type { Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
 
 /** GM 整局跑在一条 agent 循环里，轮数上限要给足（每幕约 2~4 轮工具调用）。 */
 const GM_MAX_ROUNDS = 300;
@@ -18,6 +18,8 @@ export interface EngineHooks {
   onScene: (scene: Scene) => Promise<string>;
   /** 终局（declare_ending 后调用，play 随即返回） */
   onEnding: (ending: Ending, state: GmState) => void;
+  /** 调试事件流（思维链片段、工具调用；按真实发生顺序）。「展示隐藏状态」模式的数据来源 */
+  onDebug?: (ev: GmDebugEvent) => void;
 }
 
 /**
@@ -49,8 +51,7 @@ export class GameEngine {
       hooks.onChunk(d);
     };
 
-    const tools = createGmTools(this.internals, (options) => {
-      // 工具物理：没有正文的场景不许递交（工具先行的模型会把正文推到下一幕，全程错位）
+    const tools = createGmTools(this.internals, (options) => {      // 工具物理：没有正文的场景不许递交（工具先行的模型会把正文推到下一幕，全程错位）
       if (!sceneText.trim()) {
         throw new Error(
           "本幕还没有叙事正文：先输出正文（会流式展示给玩家），再递交选项。玩家只能通过正文了解故事。",
@@ -76,7 +77,7 @@ export class GameEngine {
           },
         );
       });
-    });
+    }, hooks.onDebug);
     this.gm = new Agent(this.gmConfig, buildGmPrompt(setup), "gm");
 
     let input =
@@ -89,6 +90,7 @@ export class GameEngine {
         await this.gm.runTurn(input, {
           tools,
           onChunk,
+          onReasoning: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
           signal,
           maxRounds: GM_MAX_ROUNDS,
           terminal: ["declare_ending"],

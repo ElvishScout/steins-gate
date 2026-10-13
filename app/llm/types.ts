@@ -106,3 +106,18 @@ export interface Ending {
   title: string;
   yearbook: string;
 }
+
+/**
+ * GM 侧的调试事件流（「展示隐藏状态」模式的附注内容；玩家永不可见）。
+ * 按真实发生顺序排列：思维链片段与工具调用交织。
+ */
+export type GmDebugEvent =
+  | { type: "reasoning"; text: string }
+  | {
+      type: "tool";
+      name: string;
+      args: Record<string, unknown>;
+      /** 执行后的权威状态快照 */
+      state: GmState;
+      error?: string;
+    };
