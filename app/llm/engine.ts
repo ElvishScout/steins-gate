@@ -83,7 +83,8 @@ export class GameEngine {
     let input =
       `[引擎] 开局：define_checkpoints 定义本收束范围的 4~6 个检查点（连成一条因果链：每个节点写上游依赖 ⇐ 先前节点，` +
       `逐条写承重条件并标注 cognition/fact；至多 1 个纯 cognition 节点，放链尾或弱下游作为欺骗窄门）` +
-      `→ 写开场白与第 1 幕正文（开场白只确认题材与基调，反辅助条款从第一行起生效）→ present_options 等待玩家行动。`;
+      `→ 写开场白与第 1 幕正文（开场白用叙事本身确立题材与基调——不罗列"题材：""基调："之类的元信息标签；` +
+      `反辅助条款从第一行起生效）→ present_options 等待玩家行动。`;
     try {
       for (let stalls = 0; !this.internals.ending; ) {
         this.internals.options = null;
@@ -101,9 +102,12 @@ export class GameEngine {
         } else if (++stalls > MAX_STALLS) {
           throw new Error("GM 连续多次未递交选项就中断了回合，无法继续对局");
         }
-        input =
-          `${snapshot(this.internals)}\n[引擎] 游戏中断：请继续——叙事、结算，然后用 ` +
-          `present_options 把选择权交还玩家（故事终结则用 declare_ending）。`;
+        input = sceneText.trim()
+          ? // 正文已流出但未交选项：提示的重点是"该交选项了"，不禁止写完（可能正被打断在半段）
+            `${snapshot(this.internals)}\n[引擎] 游戏中断：本幕正文已展示给玩家——` +
+            `请调用 present_options 把选择权交还玩家（故事终结则用 declare_ending）。`
+          : `${snapshot(this.internals)}\n[引擎] 游戏中断：请继续——叙事、结算，然后用 ` +
+            `present_options 把选择权交还玩家（故事终结则用 declare_ending）。`;
       }
     } catch (e) {
       if (signal.aborted) return; // stop() 主动中止，安静收场

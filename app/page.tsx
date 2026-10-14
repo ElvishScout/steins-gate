@@ -189,10 +189,6 @@ export default function Home() {
       // play() 静默返回 = 被主动停止（自然终局走 onEnding，异常走 catch）
       const ended = endingRef.current as Ending | null;
       if (!ended) setStopped(true);
-      // 复盘链：观战模式下把结局+年鉴喂给玩家 agent，它的复盘入流（PLAYER_PROMPT 的契约）
-      if (player && ended) {
-        await runPlayer(player, `【结局】${ended.title}\n\n${ended.yearbook}`);
-      }
     } catch (e) {
       // 报错时流式残片照旧丢弃
       setLive(null);

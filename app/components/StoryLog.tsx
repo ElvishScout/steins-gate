@@ -84,12 +84,14 @@ export function StoryLog(props: {
         }
         if (e.kind === "ending") {
           return (
-            <section key={i} className="rounded border-2 border-vermilion bg-paper-dim p-4">
-              <h2 className="mb-2 font-serif font-bold text-vermilion">{e.title}</h2>
-              <div className="font-serif text-sm leading-relaxed whitespace-pre-wrap text-ink">
-                {e.yearbook}
-              </div>
+            <section key={i}>
               {props.showHidden && <DebugNote info={e.debug} />}
+              <div className="mt-2 rounded border-2 border-vermilion bg-paper-dim p-4">
+                <h2 className="mb-2 font-serif font-bold text-vermilion">{e.title}</h2>
+                <div className="font-serif text-sm leading-relaxed whitespace-pre-wrap text-ink">
+                  {e.yearbook}
+                </div>
+              </div>
             </section>
           );
         }

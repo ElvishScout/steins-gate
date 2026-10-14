@@ -12,6 +12,15 @@ const TIER_RANGES: Record<string, [number, number]> = {
 
 const round6 = (x: number): number => Math.round(x * 1e6) / 1e6;
 
+/**
+ * 节奏物理：一条收束范围的预期长度 = 4~6 检查点 × 至少隔 2 幕 ≈ 8~18 幕。
+ * 软上限后在 settle 返回里持续催推进；硬上限后 present_options 拒绝再开新场景；
+ * 全局极限幕数后只剩 declare_ending 一条路。防止对局无限发散。
+ */
+const SOFT_ACTS_PER_LINE = 16;
+const HARD_ACTS_PER_LINE = 24;
+const MAX_TOTAL_ACTS = 48;
+
 /** 自由输入的矛盾量级由幅度推定（自由输入只是来源，账本上只记三种量级）。 */
 function magnitudeOf(tier: string, absDelta: number): ContradictionMagnitude | null {
   if (tier === "subtle" || tier === "notable" || tier === "fundamental") return tier;
@@ -51,6 +60,8 @@ export interface GmInternals {
   state: GmState;
   /** 本幕是否已结算（settle 幂等约束；present_options/declare_ending 成功时复位） */
   settledThisAct: boolean;
+  /** 当前收束范围已进行的幕数（节奏判定用；跃迁时清零，state.act 是全剧累计不清零） */
+  actsThisLine: number;
   /** present_options 捕获的本幕选项 */
   options: string[] | null;
   /** declare_ending 捕获的结局 */
@@ -71,6 +82,7 @@ export function freshInternals(barrier: number): GmInternals {
       ending: null,
     },
     settledThisAct: false,
+    actsThisLine: 0,
     options: null,
     ending: null,
   };
@@ -96,6 +108,17 @@ const MAGNITUDE_LABEL: Record<ContradictionMagnitude, string> = {
   fundamental: "根本",
 };
 
+/** 节奏提示（注入 settle 返回值与状态快照）：检查点迟迟不触发时催 GM 向终幕推进。 */
+function pacingNote(gm: GmInternals): string {
+  const pending = gm.state.checkpoints.filter((c) => c.status === "pending").length;
+  if (pending === 0 || gm.actsThisLine < SOFT_ACTS_PER_LINE) return "";
+  const urgent = gm.actsThisLine >= HARD_ACTS_PER_LINE - 4;
+  return (
+    `｜节奏${urgent ? "警告" : "提示"}：本收束范围已进行 ${gm.actsThisLine} 幕，仍有 ${pending} 个检查点未触发。` +
+    `世界线不会永远等待——让收束持续命中检查点${urgent ? "，故事必须在数幕内进入终幕" : "，故事向终幕推进"}。`
+  );
+}
+
 /** 注入给 GM 的隐藏状态快照（玩家永不可见），随 present_options 的结果每幕返回。 */
 export function snapshot(gm: GmInternals): string {
   const s = gm.state;
@@ -118,10 +141,11 @@ export function snapshot(gm: GmInternals): string {
       .join("；") || "（空）";
   const jr = jumpReadiness(s);
   return (
-    `[内部状态快照] 世界线=${s.worldline} 变动率=${s.divergence.toFixed(6)}% ` +
+    `[内部状态快照] 第${s.act}幕（本线第${gm.actsThisLine}幕） 世界线=${s.worldline} ` +
+    `变动率=${s.divergence.toFixed(6)}% ` +
     `壁垒=${s.barrier.toFixed(6)}%${jr.fragile ? "（贴线脆弱）" : ""} 检查点=${cps} ` +
     `未消化矛盾=${cons}｜未消化根本矛盾×${jr.activeFundamental} ` +
-    `跳线判定=${jr.ready ? "就绪（应跃迁）" : "不就绪"}`
+    `跳线判定=${jr.ready ? "就绪（应跃迁）" : "不就绪"}${pacingNote(gm)}`
   );
 }
 
@@ -235,11 +259,13 @@ export function createGmTools(
         if (next < 0) next = 0;
         s.divergence = next;
         s.act += 1;
+        gm.actsThisLine += 1;
         gm.settledThisAct = true;
         s.history.push(
           `第${s.act}幕结算：${str(args.summary, "summary")}（${tier} ${signed >= 0 ? "+" : ""}${round6(signed)}% → ${next.toFixed(6)}%）${entry ? `｜记矛盾 ${entry.id}[${MAGNITUDE_LABEL[entry.magnitude]}]` : ""}${typeof args.note === "string" ? `｜${args.note}` : ""}`,
         );
         const jr = jumpReadiness(s);
+        const pacing = pacingNote(gm);
         return {
           divergence: s.divergence,
           worldline: s.worldline,
@@ -249,11 +275,12 @@ export function createGmTools(
           activeFundamental: jr.activeFundamental,
           fragile: jr.fragile,
           jumpReady: jr.ready,
-          message: jr.ready
-            ? "未消化的根本矛盾已撕裂因果链！必须调用 jump_worldline 完成跃迁（读数由你设定到新区间；旧检查点作废，新收束范围需要 define_checkpoints 重建）。"
-            : blockedAtBarrier
-              ? "读数已贴在壁垒内侧。读数本身不是跳线条件：细微/显著矛盾无论积累多少都永不跳线——跃迁只能靠未消化的根本矛盾撕裂因果链（贴线脆弱时仅需 1 个），或在含 cognition 承重条件的检查点上尝试欺骗世界。"
-              : "结算完成。",
+          message:
+            (jr.ready
+              ? "未消化的根本矛盾已撕裂因果链！必须调用 jump_worldline 完成跃迁（读数由你设定到新区间；旧检查点作废，新收束范围需要 define_checkpoints 重建）。"
+              : blockedAtBarrier
+                ? "读数已贴在壁垒内侧。读数本身不是跳线条件：细微/显著矛盾无论积累多少都永不跳线——跃迁只能靠未消化的根本矛盾撕裂因果链（贴线脆弱时仅需 1 个），或在含 cognition 承重条件的检查点上尝试欺骗世界。"
+                : "结算完成。") + pacing,
         };
       },
     },
@@ -415,6 +442,7 @@ export function createGmTools(
         s.worldline = str(args.worldline, "worldline");
         s.barrier = newBarrier;
         s.divergence = round6(d);
+        gm.actsThisLine = 0; // 新收束范围重新开始计幕
         for (const cp of s.checkpoints) if (cp.status === "pending") cp.status = "void";
         s.history.push(
           `⚡ 跃迁至 ${s.worldline} 线（读数 ${s.divergence.toFixed(6)}%），旧检查点作废，新壁垒 ${s.barrier.toFixed(6)}%${typeof args.note === "string" ? `｜${args.note}` : ""}`,
@@ -441,7 +469,21 @@ export function createGmTools(
       },
       async run(args) {
         if (gm.state.act >= 1 && !gm.settledThisAct) {
-          throw new Error("本幕尚未结算：先调用 settle 结算玩家行动，再递交选项。");
+          throw new Error(
+            "本幕尚未结算：先调用 settle 结算玩家行动，结算后直接重试本工具递交选项。",
+          );
+        }
+        // 节奏物理（先于一切常规校验）：故事不许无限发散
+        if (gm.state.act >= MAX_TOTAL_ACTS) {
+          throw new Error(
+            `故事已达极限长度（${MAX_TOTAL_ACTS} 幕），不得再递交选项：本回合内用 update_checkpoint 让剩余检查点尘埃落定（triggered/void），然后直接 declare_ending 收束全篇。`,
+          );
+        }
+        const pendingCount = gm.state.checkpoints.filter((c) => c.status === "pending").length;
+        if (pendingCount > 0 && gm.actsThisLine >= HARD_ACTS_PER_LINE) {
+          throw new Error(
+            `本收束范围已进行 ${gm.actsThisLine} 幕（上限 ${HARD_ACTS_PER_LINE}），不得再开新场景：本回合内让剩余 ${pendingCount} 个检查点全部触发或作废（update_checkpoint），随后进入终幕（空选项 present_options 或 declare_ending）。`,
+          );
         }
         const opts = args.options;
         // 终幕（当前收束范围没有 pending 检查点）不给分支选项：允许空选项列表
