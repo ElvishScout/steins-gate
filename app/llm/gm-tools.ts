@@ -1,5 +1,5 @@
 import type { AgentTool } from "./agent";
-import { barrierOf, profileOf } from "./prompts/gm";
+import { barrierOf, GM_SKILLS, profileOf, type GmSkillId } from "./prompts/gm";
 import type { Checkpoint, Contradiction, ContradictionMagnitude, Difficulty, GmDebugEvent, GmState } from "./types";
 
 /** 矛盾量级档位 → 合法幅度区间（百分点，取绝对值）。restorative 为负方向。 */
@@ -397,7 +397,19 @@ export function createGmTools(
         }
         cp.status = args.status as Checkpoint["status"];
         if (typeof args.note === "string") cp.note = args.note;
-        return { ok: true, checkpoint: cp };
+        const allDone =
+          gm.state.checkpoints.length > 0 &&
+          gm.state.checkpoints.every((c) => c.status !== "pending");
+        return {
+          ok: true,
+          checkpoint: cp,
+          ...(allDone
+            ? {
+                message:
+                  "当前收束范围的所有检查点已尘埃落定！请调用 load_skill({ id: 'el-psy-kongroo' }) 加载终幕与年鉴规范，写出终幕正文后以空选项 present_options({ options: [] }) 交由玩家作最终回应。",
+              }
+            : {}),
+        };
       },
     },
     {
@@ -549,6 +561,33 @@ export function createGmTools(
           yearbook: str(args.yearbook, "yearbook"),
         };
         return { ok: true };
+      },
+    },
+    {
+      name: "load_skill",
+      description: "按需加载专题规则模块（对玩家不可见）。各模块的触发条件见系统提示词。",
+      parameters: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            enum: Object.keys(GM_SKILLS),
+            description: "要加载的专题模块 ID",
+          },
+        },
+        required: ["id"],
+      },
+      run(args) {
+        const id = str(args.id, "id") as GmSkillId;
+        const skill = GM_SKILLS[id];
+        if (!skill) {
+          throw new Error(`未知模块 "${id}"，可选值：${Object.keys(GM_SKILLS).join(" / ")}`);
+        }
+        return {
+          id,
+          name: skill.name,
+          instructions: skill.content,
+        };
       },
     },
   ];
