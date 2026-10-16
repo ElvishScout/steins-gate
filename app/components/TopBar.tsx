@@ -26,9 +26,9 @@ export function TopBar(props: {
         value={props.difficulty}
         onChange={(e) => props.onDifficulty(e.target.value as GameSetup["difficulty"])}
       >
-        <option value="easy">轻松 · 0.8%</option>
-        <option value="standard">标准 · 1.0%</option>
-        <option value="hard">残酷 · 1.2%</option>
+        <option value="easy">轻松 · 浅层 (0.62~0.78%)</option>
+        <option value="standard">标准 · 经典 (0.38~0.58%)</option>
+        <option value="hard">残酷 · 深渊 (0.09~0.34%)</option>
       </select>
       <span className="ml-auto text-xs text-ink-soft">{props.status}</span>
       {props.busy ? (

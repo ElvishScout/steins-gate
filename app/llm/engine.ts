@@ -1,6 +1,6 @@
 import { Agent } from "./agent";
 import { createGmTools, freshInternals, snapshot, type GmInternals } from "./gm-tools";
-import { barrierOf, buildGmPrompt } from "./prompts/gm";
+import { buildGmPrompt } from "./prompts/gm";
 import type { Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
 
 /** GM 整局跑在一条 agent 循环里，轮数上限要给足（每幕约 2~4 轮工具调用）。 */
@@ -29,7 +29,7 @@ export interface EngineHooks {
  */
 export class GameEngine {
   private gm: Agent | null = null;
-  private internals: GmInternals = freshInternals(1);
+  private internals: GmInternals = freshInternals("standard");
   private aborter: AbortController | null = null;
   private cancelInput: ((e: Error) => void) | null = null;
 
@@ -42,7 +42,7 @@ export class GameEngine {
   async play(setup: GameSetup, hooks: EngineHooks): Promise<void> {
     this.aborter = new AbortController();
     const signal = this.aborter.signal;
-    this.internals = freshInternals(barrierOf(setup.difficulty));
+    this.internals = freshInternals(setup.difficulty);
 
     // 累积当前场景的正文：present_options 挂起时切一片给 onScene，然后清零重新攒
     let sceneText = "";
@@ -81,10 +81,11 @@ export class GameEngine {
     this.gm = new Agent(this.gmConfig, buildGmPrompt(setup), "gm");
 
     let input =
-      `[引擎] 开局：define_checkpoints 定义本收束范围的 4~6 个检查点（连成一条因果链：每个节点写上游依赖 ⇐ 先前节点，` +
-      `逐条写承重条件并标注 cognition/fact；至多 1 个纯 cognition 节点，放链尾或弱下游作为欺骗窄门）` +
-      `→ 写开场白与第 1 幕正文（开场白用叙事本身确立题材与基调——不罗列"题材：""基调："之类的元信息标签；` +
-      `反辅助条款从第一行起生效）→ present_options 等待玩家行动。`;
+      `${snapshot(this.internals)}\n` +
+      `[引擎] 开局指令：\n` +
+      `1. 先调用 define_checkpoints 定义本收束范围的 4~6 个检查点（前中期节点为可延后或变形的「过程支点」，最后一个节点为整条收束范围锁死的「终极吸引子」；写明 upstream 上游依赖与 conditions 承重条件，标注 cognition/fact；至多 1 个纯 cognition 节点，建议将链尾设为纯 cognition 或「cognition + 可由前期伏笔置换的 fact」复合窄门）。\n` +
+      `2. 直接写出第 1 幕小说正文：以克制、有生活质感的小说笔法自然切入场景与人物，不写"题材/主角/基调"等元信息标签，不生造突兀的危机或惊悚悬念，在顺理成章的行动节点处收笔（反辅助铁律从第一行起生效）。\n` +
+      `3. 调用 present_options 递交 2~4 个自然、有区分度且顺序随机打乱的行动选项，等待玩家行动。`;
     try {
       for (let stalls = 0; !this.internals.ending; ) {
         this.internals.options = null;
@@ -104,10 +105,8 @@ export class GameEngine {
         }
         input = sceneText.trim()
           ? // 正文已流出但未交选项：提示的重点是"该交选项了"，不禁止写完（可能正被打断在半段）
-            `${snapshot(this.internals)}\n[引擎] 游戏中断：本幕正文已展示给玩家——` +
-            `请调用 present_options 把选择权交还玩家（故事终结则用 declare_ending）。`
-          : `${snapshot(this.internals)}\n[引擎] 游戏中断：请继续——叙事、结算，然后用 ` +
-            `present_options 把选择权交还玩家（故事终结则用 declare_ending）。`;
+            `${snapshot(this.internals)}\n[引擎] 回合未完成：本幕正文已输出，请立即调用 present_options 将选择权交给玩家（若故事已至终局则调用 declare_ending）。`
+          : `${snapshot(this.internals)}\n[引擎] 回合未完成：请按顺序继续——先调用 settle 结算本幕行动（若尚未结算），再输出本幕小说正文，最后调用 present_options 将选择权交给玩家（若故事已至终局则调用 declare_ending）。`;
       }
     } catch (e) {
       if (signal.aborted) return; // stop() 主动中止，安静收场
