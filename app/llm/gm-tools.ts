@@ -366,7 +366,12 @@ export function createGmTools(
           ...c,
           status: "pending" as const,
         }));
-        return { ok: true, count: gm.state.checkpoints.length };
+        return {
+          ok: true,
+          count: gm.state.checkpoints.length,
+          message:
+            "检查点因果链已建立。请继续思考并写出本幕小说正文，随后调用 present_options 将选择权交给玩家。",
+        };
       },
     },
     {
@@ -583,11 +588,20 @@ export function createGmTools(
         if (!skill) {
           throw new Error(`未知模块 "${id}"，可选值：${Object.keys(GM_SKILLS).join(" / ")}`);
         }
-        return {
-          id,
-          name: skill.name,
-          instructions: skill.content,
-        };
+        return skill.content;
+      },
+      followUpUser(args) {
+        const id = String(args.id ?? "") as GmSkillId;
+        if (gm.state.checkpoints.length === 0) {
+          return "[引擎] 技能模块已加载。请结合上述规则继续思考并推进本回合：先调用 define_checkpoints 定义本收束范围的 4~6 个检查点，随后写出第 1 幕小说正文，最后调用 present_options。";
+        }
+        if (id === "el-psy-kongroo") {
+          return "[引擎] 技能模块已加载。请按上述终幕规范继续思考并推进：若尚未进行终幕互动，请写出终幕正文并调用 present_options({ options: [] })；若已收到玩家的最终回应，请调用 settle 结算、写出尾声正文并调用 declare_ending。";
+        }
+        if (gm.state.act >= 1 && !gm.settledThisAct) {
+          return "[引擎] 技能模块已加载。请结合上述规则继续思考并推进本回合：先调用 settle 结算玩家本轮行动（并按需更新检查点或跃迁），随后写出本幕小说正文，最后调用 present_options。";
+        }
+        return "[引擎] 技能模块已加载。请结合上述规则继续思考并推进本回合：写出本幕小说正文，随后调用 present_options 将选择权交给玩家。";
       },
     },
   ];
