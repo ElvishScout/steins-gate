@@ -1,6 +1,6 @@
 import { Agent } from "./agent";
 import { createGmTools, freshInternals, snapshot, type GmInternals } from "./gm-tools";
-import { buildGmPrompt } from "./prompts/gm";
+import { buildGmPrompt, buildKickoffPrompt } from "./prompts/gm";
 import type { Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
 
 /** GM 整局跑在一条 agent 循环里，轮数上限要给足（每幕约 2~4 轮工具调用）。 */
@@ -80,13 +80,7 @@ export class GameEngine {
     }, hooks.onDebug);
     this.gm = new Agent(this.gmConfig, buildGmPrompt(setup), "gm");
 
-    let input =
-      `${snapshot(this.internals)}\n` +
-      `[引擎] 开局指令：\n` +
-      `1. （可选）若开局设定涉及故事内时空干涉/跨线感知或第四面墙元叙事，先调用 load_skill 加载 reading-steiner 或 fourth-wall。\n` +
-      `2. 调用 define_checkpoints 定义本收束范围的 4~6 个检查点（前中期节点为可延后或变形的「过程支点」，最后一个节点为整条收束范围锁死的「终极吸引子」；写明 upstream 上游依赖与 conditions 承重条件，标注 cognition/fact；至多 1 个纯 cognition 节点，建议将链尾设为纯 cognition 或「cognition + 可由前期伏笔置换的 fact」复合窄门）。\n` +
-      `3. 直接写出第 1 幕小说正文：以克制、有生活质感的小说笔法自然切入场景与人物，不写"题材/主角/基调"等元信息标签，不生造突兀的危机或惊悚悬念，在顺理成章的行动节点处收笔。\n` +
-      `4. 调用 present_options 递交 2~4 个自然、有区分度且顺序随机打乱的行动选项，等待玩家行动。`;
+    let input = buildKickoffPrompt(setup, snapshot(this.internals));
     try {
       for (let stalls = 0; !this.internals.ending; ) {
         this.internals.options = null;
@@ -107,7 +101,9 @@ export class GameEngine {
         input = sceneText.trim()
           ? // 正文已流出但未交选项：提示的重点是"该交选项了"，不禁止写完（可能正被打断在半段）
             `${snapshot(this.internals)}\n[引擎] 回合未完成：本幕正文已输出，请立即调用 present_options 将选择权交给玩家（若故事已至终局则调用 declare_ending）。`
-          : `${snapshot(this.internals)}\n[引擎] 回合未完成：请按顺序继续——先调用 settle 结算本幕行动（若尚未结算），再输出本幕小说正文，最后调用 present_options 将选择权交给玩家（若故事已至终局则调用 declare_ending）。`;
+          : this.internals.state.checkpoints.length === 0
+            ? `${snapshot(this.internals)}\n[引擎] 回合未完成：请继续——先调用 define_checkpoints 定义本收束范围的 4~6 个检查点，再输出本幕小说正文，最后调用 present_options 将选择权交给玩家。`
+            : `${snapshot(this.internals)}\n[引擎] 回合未完成：请按顺序继续——先调用 settle 结算本幕行动（若尚未结算），再输出本幕小说正文，最后调用 present_options 将选择权交给玩家（若故事已至终局则调用 declare_ending）。`;
       }
     } catch (e) {
       if (signal.aborted) return; // stop() 主动中止，安静收场

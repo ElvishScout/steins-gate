@@ -170,21 +170,44 @@ export const GM_SKILLS: Record<GmSkillId, { name: string; when: string; content:
 };
 
 /**
- * GM 系统提示词：收束引擎核心指令集（基础常驻层）。
- * 特定题材破壁与特定阶段细则通过 load_skill 按需加载。
+ * 构造开局首条 user 消息：将动态的本局设定（可能包含多行长文本的题材/世界观、主角、随机意象池）
+ * 与开局指令放在一起，既避免与 system prompt 重复，又能妥善承载多行长文本设定，并处在模型注意力最集中的位置。
  */
-export function buildGmPrompt(setup: GameSetup): string {
+export function buildKickoffPrompt(setup: GameSetup, stateSnapshot: string): string {
   const barrier = barrierOf(setup.difficulty);
   const profile = profileOf(setup.difficulty);
-  const fragilePct = Math.round(profile.fragileRatio * 100);
   const genrePool = pickRandom(GENRE_KEYWORDS, 6).join("、");
   const imageryPool = pickRandom(IMAGERY_KEYWORDS, 8).join("、");
-  const genreSpec =
+  const genreText =
     setup.genre?.trim() ||
     `由你从本局随机题材词【${genrePool}】中任选或自由组合展开`;
-  const protagonistSpec =
+  const protagonistText =
     setup.protagonist?.trim() ||
     "由你根据所选题材自然代拟（在叙事中自然交代姓名、身份与性情）";
+
+  return `${stateSnapshot}
+
+[本局设定]
+- 难度：${profile.label}（开局壁垒 = ${barrier.toFixed(6)}%）
+- 本局意象词：【${imageryPool}】（可从中自由选用 1～3 个意象化入氛围、细节或隐喻，其余忽略）
+- 主角设定：${protagonistText}
+- 题材与世界观：
+${genreText}
+
+[引擎] 开局指令：
+1. 若上述「题材与世界观」或「主角设定」涉及故事内时空干涉/跨线感知或第四面墙元叙事，请先调用 load_skill 加载 reading-steiner 或 fourth-wall。
+2. 调用 define_checkpoints 定义本收束范围的 4~6 个检查点（前中期节点为可延后或变形的「过程支点」，最后一个节点为整条收束范围锁死的「终极吸引子」；写明 upstream 上游依赖与 conditions 承重条件，标注 cognition/fact；至多 1 个纯 cognition 节点，建议将链尾设为纯 cognition 或「cognition + 可由前期伏笔置换的 fact」复合窄门）。
+3. 直接写出第 1 幕小说正文：以克制、有生活质感的小说笔法自然切入场景与人物，不写"题材/主角/基调"等元信息标签，不生造突兀的危机或惊悚悬念，在顺理成章的行动节点处收笔。
+4. 调用 present_options 递交 2~4 个自然、有区分度且顺序随机打乱的行动选项，等待玩家行动。`;
+}
+
+/**
+ * GM 系统提示词：收束引擎核心指令集（基础常驻规则层）。
+ * 特定题材破壁与特定阶段细则通过 load_skill 按需加载；本局动态设定由开局 user 消息传入。
+ */
+export function buildGmPrompt(setup: GameSetup): string {
+  const profile = profileOf(setup.difficulty);
+  const fragilePct = Math.round(profile.fragileRatio * 100);
 
   const skillCatalog = (Object.entries(GM_SKILLS) as [GmSkillId, (typeof GM_SKILLS)[GmSkillId]][])
     .map(([id, s]) => `  - \`${id}\`（${s.name}）：${s.when}`)
@@ -195,11 +218,6 @@ export function buildGmPrompt(setup: GameSetup): string {
 
 # 运行环境与工作流
 
-- **本局参数**：
-  - 题材：${genreSpec}
-  - 主角：${protagonistSpec}
-  - 本局意象词：【${imageryPool}】（可从中自由选用 1～3 个意象化入氛围、细节或隐喻，其余忽略）
-  - 难度：${profile.label}，开局壁垒 = ${barrier.toFixed(6)}%（1% 壁垒）。
 - **文本与工具分离**：你的普通文本输出直接作为小说正文流式展示给玩家；所有数值、检查点与矛盾账本操作均通过工具完成（工具调用及其返回值对玩家完全不可见，工具返回值即当前权威状态）。
 - **核心工具职责**：
   - \`define_checkpoints\`：定义当前收束范围的检查点因果链（开局及每次跃迁后调用）。
@@ -211,7 +229,7 @@ export function buildGmPrompt(setup: GameSetup): string {
   - \`declare_ending\`：终幕结算后宣告结局并输出世界线年鉴。
   - \`load_skill\`：**按需加载专题规则模块**。在开局或故事中途的任意回合，只要剧情发展或玩家行动触及以下条件，即可随时调用 \`load_skill\` 解锁对应规则：
 ${skillCatalog}
-- **开局流程**：（若开局设定即涉及时空观测或元叙事，可先调用 \`load_skill\`）→ 调用 \`define_checkpoints\` 建立因果链 → 直接写出第 1 幕小说正文 → 调用 \`present_options\` 交出选择权。
+- **开局流程**：读取开局指令中的「本局设定」→（若涉及时空观测或元叙事，先调用 \`load_skill\`）→ 调用 \`define_checkpoints\` 建立因果链 → 直接写出第 1 幕小说正文 → 调用 \`present_options\` 交出选择权。
 
 ---
 

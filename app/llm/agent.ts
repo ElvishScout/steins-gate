@@ -2,9 +2,11 @@ import { streamTurn, type ToolSpec } from "./llm";
 import type { ChatMessage, LLMConfig, ToolCall } from "./types";
 
 export interface AgentTool extends ToolSpec {
-  /** 返回值会 JSON 序列化为 tool result 回给模型；抛异常会以错误文本回填。
+  /** 返回值会序列化为 tool result 回给模型；抛异常会以错误文本回填。
    *  可以 async——比如挂起等待用户输入（Claude Code 的 AskUserQuestion 模式）。 */
   run: (args: Record<string, unknown>) => unknown | Promise<unknown>;
+  /** 工具执行成功后可选追加一条实际 role: "user" 消息，用于触发推理模型开启新思维链 */
+  followUpUser?: (args: Record<string, unknown>) => string | null | undefined;
 }
 
 const MAX_TOOL_ROUNDS = 8;
@@ -78,6 +80,7 @@ export class Agent {
       if (toolCalls.length === 0) return { text: fullText, called };
 
       let hitTerminal = false;
+      const userFollowUps: string[] = [];
       for (const tc of toolCalls) {
         called.push(tc.name);
         const tool = opts?.tools?.find((t) => t.name === tc.name);
@@ -86,13 +89,19 @@ export class Agent {
           result = `错误：未知工具 ${tc.name}`;
         } else {
           try {
-            result = JSON.stringify((await tool.run(tc.args)) ?? { ok: true });
+            const raw = (await tool.run(tc.args)) ?? { ok: true };
+            result = typeof raw === "string" ? raw : JSON.stringify(raw);
+            const followUp = tool.followUpUser?.(tc.args);
+            if (followUp) userFollowUps.push(followUp);
             hitTerminal ||= opts?.terminal?.includes(tc.name) ?? false;
           } catch (e) {
             result = `错误：${e instanceof Error ? e.message : String(e)}`;
           }
         }
         this.history.push({ role: "tool", toolCallId: tc.id, content: result });
+      }
+      if (userFollowUps.length > 0) {
+        this.history.push({ role: "user", content: userFollowUps.join("\n") });
       }
       if (hitTerminal) return { text: fullText, called };
     }
