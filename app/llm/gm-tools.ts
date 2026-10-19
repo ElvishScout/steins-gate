@@ -1,5 +1,5 @@
 import type { AgentTool } from "./agent";
-import { barrierOf, GM_SKILLS, profileOf, type GmSkillId } from "./prompts/gm";
+import { barrierOf, GM_SKILLS, profileOf, rollInspiration, type GmSkillId } from "./prompts/gm";
 import type { Checkpoint, Contradiction, ContradictionMagnitude, Difficulty, GmDebugEvent, GmState } from "./types";
 
 /** 矛盾量级档位 → 合法幅度区间（百分点，取绝对值）。restorative 为负方向。 */
@@ -46,9 +46,7 @@ export function jumpReadiness(
   fragile: boolean;
   breach: boolean;
 } {
-  const fund = s.contradictions.filter(
-    (c) => c.status === "active" && c.magnitude === "fundamental",
-  );
+  const fund = s.contradictions.filter((c) => c.status === "active" && c.magnitude === "fundamental");
   // 每个吸引子场区间宽度恒为 1%（[barrier - 1, barrier)），脆弱阈值按当前区间进度计算
   const lower = Math.max(0, Math.round(s.barrier) - 1);
   const fragile = s.divergence >= round6(lower + fragileRatio);
@@ -194,7 +192,6 @@ export function createGmTools(
     };
   };
   const tools: AgentTool[] = [
-
     {
       name: "settle",
       description:
@@ -208,7 +205,8 @@ export function createGmTools(
           related: { type: "string", description: "关联的检查点 id（该行动所铺垫、试探或对抗的节点）" },
           breach: {
             type: "boolean",
-            description: "本次行动是否直接击穿某个检查点的核心承重条件（仅 fundamental/free 可为 true，单次即可撕裂因果链）",
+            description:
+              "本次行动是否直接击穿某个检查点的核心承重条件（仅 fundamental/free 可为 true，单次即可撕裂因果链）",
           },
           digests: {
             type: "array",
@@ -311,7 +309,11 @@ export function createGmTools(
               type: "object",
               properties: {
                 id: { type: "string" },
-                content: { type: "string", description: "节点的显现事件及其撬动的下游因果功能（格式：事件表象——它导致的下游处境、关系或局势转折）" },
+                content: {
+                  type: "string",
+                  description:
+                    "节点的显现事件及其撬动的下游因果功能（格式：事件表象——它导致的下游处境、关系或局势转折）",
+                },
                 upstream: {
                   type: "array",
                   items: { type: "string" },
@@ -323,7 +325,10 @@ export function createGmTools(
                   items: {
                     type: "object",
                     properties: {
-                      condition: { type: "string", description: "该节点得以成立的具体承重条件（即因果链不能断裂的关键一环）" },
+                      condition: {
+                        type: "string",
+                        description: "该节点得以成立的具体承重条件（即因果链不能断裂的关键一环）",
+                      },
                       via: { type: "string", enum: ["cognition", "fact"] },
                     },
                     required: ["condition", "via"],
@@ -344,7 +349,9 @@ export function createGmTools(
         const seen = new Set<string>();
         for (const c of list as Checkpoint[]) {
           if (!Array.isArray(c.upstream)) {
-            throw new Error(`检查点 ${c.id} 缺少 upstream：每个节点都要写上游依赖（首节点为空数组）——没有上游，这个节点就不会存在。`);
+            throw new Error(
+              `检查点 ${c.id} 缺少 upstream：每个节点都要写上游依赖（首节点为空数组）——没有上游，这个节点就不会存在。`,
+            );
           }
           for (const up of c.upstream) {
             if (!seen.has(up)) {
@@ -356,11 +363,11 @@ export function createGmTools(
           }
           seen.add(c.id);
         }
-        const pureCognition = (list as Checkpoint[]).filter((c) =>
-          c.conditions.every((x) => x.via === "cognition"),
-        );
+        const pureCognition = (list as Checkpoint[]).filter((c) => c.conditions.every((x) => x.via === "cognition"));
         if (pureCognition.length > 1) {
-          throw new Error("每个收束范围至多 1 个'全部承重条件均为 cognition'的检查点（宜放在链尾或弱下游，作为通往 SG 线式结局的窄门），请重发。");
+          throw new Error(
+            "每个收束范围至多 1 个'全部承重条件均为 cognition'的检查点（宜放在链尾或弱下游，作为通往 SG 线式结局的窄门），请重发。",
+          );
         }
         gm.state.checkpoints = (list as Omit<Checkpoint, "status">[]).map((c) => ({
           ...c,
@@ -369,8 +376,7 @@ export function createGmTools(
         return {
           ok: true,
           count: gm.state.checkpoints.length,
-          message:
-            "检查点因果链已建立。请继续思考并写出本幕小说正文，随后调用 present_options 将选择权交给玩家。",
+          message: "检查点因果链已建立。请继续思考并写出本幕小说正文，随后调用 present_options 将选择权交给玩家。",
         };
       },
     },
@@ -397,14 +403,14 @@ export function createGmTools(
             );
           }
           if (typeof args.note !== "string" || !args.note.trim()) {
-            throw new Error("标记 deceived 必须在 note 里逐条说明承重条件如何被保全：cognition 条件如何伪造、fact 条件如何被真实促成。");
+            throw new Error(
+              "标记 deceived 必须在 note 里逐条说明承重条件如何被保全：cognition 条件如何伪造、fact 条件如何被真实促成。",
+            );
           }
         }
         cp.status = args.status as Checkpoint["status"];
         if (typeof args.note === "string") cp.note = args.note;
-        const allDone =
-          gm.state.checkpoints.length > 0 &&
-          gm.state.checkpoints.every((c) => c.status !== "pending");
+        const allDone = gm.state.checkpoints.length > 0 && gm.state.checkpoints.every((c) => c.status !== "pending");
         return {
           ok: true,
           checkpoint: cp,
@@ -466,7 +472,9 @@ export function createGmTools(
         const newBarrier = lower + 1;
         const d = typeof args.divergence === "number" ? args.divergence : NaN;
         if (Number.isNaN(d) || d < lower || d >= newBarrier) {
-          throw new Error(`跃迁后的读数必须落在新区间 [${lower.toFixed(6)}%, ${newBarrier.toFixed(6)}%) 内，收到 ${String(args.divergence)}。`);
+          throw new Error(
+            `跃迁后的读数必须落在新区间 [${lower.toFixed(6)}%, ${newBarrier.toFixed(6)}%) 内，收到 ${String(args.divergence)}。`,
+          );
         }
         s.worldline = str(args.worldline, "worldline");
         s.barrier = newBarrier;
@@ -481,7 +489,8 @@ export function createGmTools(
           worldline: s.worldline,
           divergence: s.divergence,
           barrier: s.barrier,
-          message: "跃迁完成。请立即调用 define_checkpoints 为新收束范围重建 4~6 个检查点（基调呼应玩家破局的方式），随后写出自然衔接的本幕小说正文。",
+          message:
+            "跃迁完成。请立即调用 define_checkpoints 为新收束范围重建 4~6 个检查点（基调呼应玩家破局的方式），随后写出自然衔接的本幕小说正文。",
         };
       },
     },
@@ -498,9 +507,7 @@ export function createGmTools(
       },
       async run(args) {
         if (gm.state.act >= 1 && !gm.settledThisAct) {
-          throw new Error(
-            "本幕尚未结算：请先调用 settle 结算玩家上一轮行动，再输出正文并调用 present_options。",
-          );
+          throw new Error("本幕尚未结算：请先调用 settle 结算玩家上一轮行动，再输出正文并调用 present_options。");
         }
         // 节奏物理（先于一切常规校验）：故事不许无限发散
         if (gm.state.act >= MAX_TOTAL_ACTS) {
@@ -516,16 +523,10 @@ export function createGmTools(
         }
         const opts = args.options;
         // 终幕（当前收束范围没有 pending 检查点）不给分支选项：允许空选项列表
-        const finale =
-          gm.state.checkpoints.length > 0 &&
-          gm.state.checkpoints.every((c) => c.status !== "pending");
+        const finale = gm.state.checkpoints.length > 0 && gm.state.checkpoints.every((c) => c.status !== "pending");
         const min = finale ? 0 : 2;
         if (!Array.isArray(opts) || opts.length < min || opts.length > 4) {
-          throw new Error(
-            finale
-              ? "终幕可以不给选项（空数组），或最多 4 个"
-              : "选项必须是 2~4 个字符串",
-          );
+          throw new Error(finale ? "终幕可以不给选项（空数组），或最多 4 个" : "选项必须是 2~4 个字符串");
         }
         // 全部校验通过、且玩家已行动之后，才允许改状态——
         // requestInput 抛错（如本幕无正文、玩家中止）时不能留下半变更的死锁状态
@@ -550,7 +551,10 @@ export function createGmTools(
         type: "object",
         properties: {
           tier: { type: "string", enum: ["convergence", "branch", "steins-gate"] },
-          title: { type: "string", description: "结局标题（格式：「<世界线> 世界线 · <六位小数读数>% <贴合故事意境的副标题>」）" },
+          title: {
+            type: "string",
+            description: "结局标题（格式：「<世界线> 世界线 · <六位小数读数>% <贴合故事意境的副标题>」）",
+          },
           yearbook: { type: "string", description: "世界线年鉴全文（复盘关键抉择、收束/跃迁/欺骗时刻与伏笔回收）" },
         },
         required: ["tier", "title", "yearbook"],
@@ -558,7 +562,9 @@ export function createGmTools(
       run(args) {
         const deceived = gm.state.checkpoints.some((c) => c.status === "deceived");
         if (args.tier === "steins-gate" && !deceived) {
-          throw new Error("SG 线式结局要求至少一个检查点被标记为 deceived（已欺骗）。当前无欺骗记录，只能选择 convergence 或 branch。");
+          throw new Error(
+            "SG 线式结局要求至少一个检查点被标记为 deceived（已欺骗）。当前无欺骗记录，只能选择 convergence 或 branch。",
+          );
         }
         gm.ending = {
           tier: str(args.tier, "tier"),
@@ -590,18 +596,17 @@ export function createGmTools(
         }
         return skill.content;
       },
-      followUpUser(args) {
-        const id = String(args.id ?? "") as GmSkillId;
-        if (gm.state.checkpoints.length === 0) {
-          return "[引擎] 技能模块已加载。请结合上述规则继续思考并推进本回合：先调用 define_checkpoints 定义本收束范围的 4~6 个检查点，随后写出第 1 幕小说正文，最后调用 present_options。";
-        }
-        if (id === "el-psy-kongroo") {
-          return "[引擎] 技能模块已加载。请按上述终幕规范继续思考并推进：若尚未进行终幕互动，请写出终幕正文并调用 present_options({ options: [] })；若已收到玩家的最终回应，请调用 settle 结算、写出尾声正文并调用 declare_ending。";
-        }
-        if (gm.state.act >= 1 && !gm.settledThisAct) {
-          return "[引擎] 技能模块已加载。请结合上述规则继续思考并推进本回合：先调用 settle 结算玩家本轮行动（并按需更新检查点或跃迁），随后写出本幕小说正文，最后调用 present_options。";
-        }
-        return "[引擎] 技能模块已加载。请结合上述规则继续思考并推进本回合：写出本幕小说正文，随后调用 present_options 将选择权交给玩家。";
+    },
+    {
+      name: "roll_inspiration",
+      description:
+        "随机抽取一批题材词与文学意象词作为创作灵感（对玩家不可见）。以设定的『确定性』为判断标准：当玩家未指定题材，或仅给出了开放性的类型/背景方向（具体故事与开场意象尚未锁定）时调用；若玩家设定已具有高确定性（如指定还原某部已知作品、特定历史事件或已锁定具体开场情境），则无需调用。",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+      run() {
+        return rollInspiration();
       },
     },
   ];

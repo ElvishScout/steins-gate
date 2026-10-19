@@ -169,36 +169,44 @@ export const GM_SKILLS: Record<GmSkillId, { name: string; when: string; content:
   },
 };
 
+/** 随机抽取一批题材词与意象词（供 roll_inspiration 工具按需调用） */
+export function rollInspiration(): { genres: string[]; imagery: string[]; note: string } {
+  return {
+    genres: pickRandom(GENRE_KEYWORDS, 6),
+    imagery: pickRandom(IMAGERY_KEYWORDS, 8),
+    note: "以上为随机灵感池：若玩家已指定题材方向，请直接忽略 genres；可从 imagery 中挑 1～3 个契合本局基调的意象融入氛围或细节，凡与玩家设定不符的词直接忽略。",
+  };
+}
+
 /**
- * 构造开局首条 user 消息：将动态的本局设定（可能包含多行长文本的题材/世界观、主角、随机意象池）
- * 与开局指令放在一起，既避免与 system prompt 重复，又能妥善承载多行长文本设定，并处在模型注意力最集中的位置。
+ * 构造开局首条 user 消息：将动态的本局设定与开局指令放在一起，
+ * 避免与 system prompt 重复，且不预先塞入可能与具体题材冲突的随机关键词。
  */
 export function buildKickoffPrompt(setup: GameSetup, stateSnapshot: string): string {
   const barrier = barrierOf(setup.difficulty);
   const profile = profileOf(setup.difficulty);
-  const genrePool = pickRandom(GENRE_KEYWORDS, 6).join("、");
-  const imageryPool = pickRandom(IMAGERY_KEYWORDS, 8).join("、");
   const genreText =
-    setup.genre?.trim() ||
-    `由你从本局随机题材词【${genrePool}】中任选或自由组合展开`;
+    setup.genre?.trim() || "未指定（请调用 roll_inspiration 抽取随机题材与意象灵感）";
   const protagonistText =
     setup.protagonist?.trim() ||
-    "由你根据所选题材自然代拟（在叙事中自然交代姓名、身份与性情）";
+    "未指定（由你根据所选题材自然代拟姓名、身份与性情）";
 
   return `${stateSnapshot}
 
 [本局设定]
 - 难度：${profile.label}（开局壁垒 = ${barrier.toFixed(6)}%）
-- 本局意象词：【${imageryPool}】（可从中自由选用 1～3 个意象化入氛围、细节或隐喻，其余忽略）
 - 主角设定：${protagonistText}
 - 题材与世界观：
 ${genreText}
 
 [引擎] 开局指令：
-1. 若上述「题材与世界观」或「主角设定」涉及故事内时空干涉/跨线感知或第四面墙元叙事，请先调用 load_skill 加载 reading-steiner 或 fourth-wall。
-2. 调用 define_checkpoints 定义本收束范围的 4~6 个检查点（前中期节点为可延后或变形的「过程支点」，最后一个节点为整条收束范围锁死的「终极吸引子」；写明 upstream 上游依赖与 conditions 承重条件，标注 cognition/fact；至多 1 个纯 cognition 节点，建议将链尾设为纯 cognition 或「cognition + 可由前期伏笔置换的 fact」复合窄门）。
+1. 【开局预检（最优先，严禁抢跑构思剧情）】在思考的最开头，先只对上述「本局设定」做两项预检：
+   - **灵感抽取（\`roll_inspiration\`）**：以设定的**「确定性」**为准——若题材未指定，或玩家给的只是开放性的类型/背景方向（具体故事脉络与开场意象尚未锁定），请调用 \`roll_inspiration\` 获取灵感；若玩家设定已具有高确定性（如明确要求还原某部已知作品、特定历史事件或已锁定具体开场剧情），则不要调用；
+   - **专题技能（\`load_skill\`）**：若设定涉及故事内时空干涉/跨线感知（\`reading-steiner\`）或第四面墙元叙事（\`fourth-wall\`），调用 \`load_skill\` 加载对应专题规则。
+   **凡需调用上述任一预检工具时，请立即停止构思具体剧情与检查点，先调用工具，待下一轮拿到返回结果后再开始构思！**
+2. 调用 \`define_checkpoints\` 定义本收束范围的 4~6 个检查点（前中期节点为可延后或变形的「过程支点」，最后一个节点为整条收束范围锁死的「终极吸引子」；写明 upstream 上游依赖与 conditions 承重条件，标注 cognition/fact；至多 1 个纯 cognition 节点，建议将链尾设为纯 cognition 或「cognition + 可由前期伏笔置换的 fact」复合窄门）。
 3. 直接写出第 1 幕小说正文：以克制、有生活质感的小说笔法自然切入场景与人物，不写"题材/主角/基调"等元信息标签，不生造突兀的危机或惊悚悬念，在顺理成章的行动节点处收笔。
-4. 调用 present_options 递交 2~4 个自然、有区分度且顺序随机打乱的行动选项，等待玩家行动。`;
+4. 调用 \`present_options\` 递交 2~4 个自然、有区分度且顺序随机打乱的行动选项，等待玩家行动。`;
 }
 
 /**
@@ -227,9 +235,10 @@ export function buildGmPrompt(setup: GameSetup): string {
   - \`jump_worldline\`：当根本矛盾撕裂因果链时执行世界线跃迁。
   - \`present_options\`：向玩家递交本幕选项并挂起等待。工具的返回值即玩家的行动文本，并附带最新内部状态快照。
   - \`declare_ending\`：终幕结算后宣告结局并输出世界线年鉴。
-  - \`load_skill\`：**按需加载专题规则模块**。在开局或故事中途的任意回合，只要剧情发展或玩家行动触及以下条件，即可随时调用 \`load_skill\` 解锁对应规则：
+  - \`roll_inspiration\`：随机抽取题材词与文学意象词作为创作灵感（当题材未指定，或设定仍属开放性方向、具体故事与开场意象尚未锁定时调用；若玩家设定已指向明确作品、特定历史事件或确定的开场剧情，则无需调用）。
+  - \`load_skill\`：**按需加载专题规则模块**。在开局或故事中途的任意回合，只要剧情发展或玩家行动触及以下条件，即可随时调用 \`load_skill\` 解锁对应规则（**凡需调用 \`load_skill\` 或 \`roll_inspiration\` 时，在拿到工具返回结果之前请勿提前构思具体剧情或检查点**）：
 ${skillCatalog}
-- **开局流程**：读取开局指令中的「本局设定」→（若涉及时空观测或元叙事，先调用 \`load_skill\`）→ 调用 \`define_checkpoints\` 建立因果链 → 直接写出第 1 幕小说正文 → 调用 \`present_options\` 交出选择权。
+- **开局流程**：读取开局指令中的「本局设定」→ 先做开局预检（按需调用 \`roll_inspiration\` 获取灵感或调用 \`load_skill\` 加载专题规则，拿到结果后再开始构思）→ 调用 \`define_checkpoints\` 建立因果链 → 直接写出第 1 幕小说正文 → 调用 \`present_options\` 交出选择权。
 
 ---
 
