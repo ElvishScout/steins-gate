@@ -1,7 +1,8 @@
+import { PLAYER_STYLES, type PlayerStyleId } from "../llm/prompts/player";
 import type { Mode } from "./entries";
 
 /**
- * 开局面板（未开局时占据故事区）：模式、题材（多行）、主角设定 + 开始按钮。
+ * 开局面板（未开局时占据故事区）：模式、题材（多行）、主角设定、观战玩家风格 + 开始按钮。
  * 难度在顶栏常驻，不在这里。
  */
 export function SetupPanel(props: {
@@ -11,6 +12,8 @@ export function SetupPanel(props: {
   onGenre: (g: string) => void;
   protagonist: string;
   onProtagonist: (p: string) => void;
+  playerStyle: PlayerStyleId;
+  onPlayerStyle: (s: PlayerStyleId) => void;
   canStart: boolean;
   onStart: () => void;
   onOpenSettings: () => void;
@@ -52,6 +55,19 @@ export function SetupPanel(props: {
           value={props.protagonist}
           onChange={(e) => props.onProtagonist(e.target.value)}
         />
+        {props.mode === "spectate" && (
+          <select
+            className="w-full rounded border border-line bg-white px-3 py-2 text-sm text-ink"
+            value={props.playerStyle}
+            onChange={(e) => props.onPlayerStyle(e.target.value as PlayerStyleId)}
+          >
+            {PLAYER_STYLES.map((s) => (
+              <option key={s.id} value={s.id}>
+                玩家风格：{s.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {props.canStart ? (
         <button

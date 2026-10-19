@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Agent } from "./llm/agent";
 import { GameEngine } from "./llm/engine";
 import { chat } from "./llm/llm";
-import { PLAYER_PROMPT } from "./llm/prompts/gm";
+import { buildPlayerPrompt, type PlayerStyleId } from "./llm/prompts/player";
 import type { Ending, GameSetup, GmDebugEvent, LLMConfig, Scene } from "./llm/types";
 import { EMPTY_CONFIG } from "./components/ConfigForm";
 import { TopBar } from "./components/TopBar";
@@ -36,6 +36,7 @@ export default function Home() {
   const [mode, setMode] = useState<Mode>("play");
   const [genre, setGenre] = useState("");
   const [protagonist, setProtagonist] = useState("");
+  const [playerStyle, setPlayerStyle] = useState<PlayerStyleId>("curious");
   const [difficulty, setDifficulty] = useState<GameSetup["difficulty"]>("standard");
   const [showHidden, setShowHidden] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -144,7 +145,8 @@ export default function Home() {
     const engine = new GameEngine(gmConfig);
     engineRef.current = engine;
     // 观战模式：玩家侧也是一个 agent，由页面持有，作为 onScene 的输入来源
-    const player = mode === "spectate" ? new Agent(playerConfig, PLAYER_PROMPT, "player") : null;
+    const player =
+      mode === "spectate" ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player") : null;
     const setup: GameSetup = { genre, protagonist, difficulty };
     try {
       await engine.play(setup, {
@@ -281,6 +283,8 @@ export default function Home() {
             onGenre={setGenre}
             protagonist={protagonist}
             onProtagonist={setProtagonist}
+            playerStyle={playerStyle}
+            onPlayerStyle={setPlayerStyle}
             canStart={canStart}
             onStart={startGame}
             onOpenSettings={() => setDrawerOpen(true)}
