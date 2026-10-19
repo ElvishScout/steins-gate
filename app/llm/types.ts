@@ -6,6 +6,8 @@ export interface LLMConfig {
   temperature?: number;
   maxTokens?: number;
   reasoningEffort?: "none" | "low" | "medium" | "high";
+  /** 使用 OpenAI Responses API（/responses），缺省走 Chat Completions（/chat/completions） */
+  useResponsesApi?: boolean;
 }
 
 export type ChatMessage =
