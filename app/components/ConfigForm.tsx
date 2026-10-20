@@ -41,19 +41,31 @@ export function ConfigForm(props: {
         <option value="medium">reasoning effort: medium</option>
         <option value="high">reasoning effort: high</option>
       </select>
-      <div className="flex items-center justify-between pt-0.5">
-        <label className="flex items-center gap-1.5 text-xs text-ink-soft select-none">
-          <input
-            type="checkbox"
-            checked={Boolean(value.useResponsesApi)}
-            onChange={(e) =>
-              onChange({ ...value, useResponsesApi: e.target.checked || undefined })
-            }
-          />
-          使用 Responses API
-        </label>
+      <div className="flex items-center justify-between gap-2 pt-0.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <label className="flex items-center gap-1.5 text-xs text-ink-soft select-none">
+            <input
+              type="checkbox"
+              checked={Boolean(value.useResponsesApi)}
+              onChange={(e) =>
+                onChange({ ...value, useResponsesApi: e.target.checked || undefined })
+              }
+            />
+            使用 Responses API
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-ink-soft select-none">
+            <input
+              type="checkbox"
+              checked={Boolean(value.useProxy)}
+              onChange={(e) =>
+                onChange({ ...value, useProxy: e.target.checked || undefined })
+              }
+            />
+            使用 API 代理
+          </label>
+        </div>
         <button
-          className="rounded border border-line bg-paper-dim px-2 py-1 text-xs text-ink hover:bg-line disabled:opacity-40"
+          className="shrink-0 rounded border border-line bg-paper-dim px-2 py-1 text-xs text-ink hover:bg-line disabled:opacity-40"
           onClick={props.onTest}
           disabled={props.testing || !value.baseURL || !value.apiKey || !value.model}
         >

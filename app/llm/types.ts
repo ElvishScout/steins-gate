@@ -8,6 +8,8 @@ export interface LLMConfig {
   reasoningEffort?: "none" | "low" | "medium" | "high";
   /** 使用 OpenAI Responses API（/responses），缺省走 Chat Completions（/chat/completions） */
   useResponsesApi?: boolean;
+  /** 通过服务端 /api/proxy 转发请求，规避浏览器 CORS 限制 */
+  useProxy?: boolean;
 }
 
 export type ChatMessage =
@@ -19,6 +21,8 @@ export interface ToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  /** Gemini 思维链签名（OpenAI 兼容层在 tool_calls[].extra_content.google.thought_signature 下发，后续轮次必须原样回传） */
+  thoughtSignature?: string;
 }
 
 export type Difficulty = "easy" | "standard" | "hard";

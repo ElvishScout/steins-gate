@@ -1,12 +1,21 @@
 import OpenAI from "openai";
 import type { ChatMessage, LLMConfig, ToolCall } from "./types";
 
+const proxyFetch: typeof fetch = (input, init) => {
+  const target =
+    typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const headers = new Headers(init?.headers);
+  headers.set("x-target-url", target);
+  return fetch("/api/proxy", { ...init, headers });
+};
+
 function makeClient(config: LLMConfig): OpenAI {
   return new OpenAI({
     baseURL: config.baseURL,
     apiKey: config.apiKey,
     // agent 整个跑在浏览器里，key 由用户自己填、只存用户自己的 localStorage
     dangerouslyAllowBrowser: true,
+    ...(config.useProxy ? { fetch: proxyFetch } : {}),
   });
 }
 
@@ -29,7 +38,7 @@ function wrapError(err: unknown): LLMError {
       return new LLMError(`LLM 请求失败（HTTP ${status}）：${err.message}`, err);
     }
     return new LLMError(
-      `无法连接 LLM 端点：${err.message}。请检查 baseURL 是否可达、中转是否允许浏览器跨域（CORS）。`,
+      `无法连接 LLM 端点：${err.message}。请检查 baseURL 是否可达，或开启「使用 API 代理」以规避浏览器跨域（CORS）限制。`,
       err,
     );
   }
@@ -46,26 +55,59 @@ export interface ToolSpec {
   parameters: Record<string, unknown>; // JSON Schema
 }
 
+/** 提取 Gemini OpenAI 兼容层在 tool_call 或 delta 上携带的 thought_signature。 */
+function extractThoughtSignature(obj: unknown): string | undefined {
+  if (typeof obj !== "object" || obj === null) return undefined;
+  const rec = obj as Record<string, unknown>;
+  const extra = rec.extra_content as Record<string, unknown> | undefined;
+  const google = extra?.google as Record<string, unknown> | undefined;
+  if (typeof google?.thought_signature === "string" && google.thought_signature) {
+    return google.thought_signature;
+  }
+  if (typeof rec.thought_signature === "string" && rec.thought_signature) {
+    return rec.thought_signature;
+  }
+  const fn = rec.function as Record<string, unknown> | undefined;
+  if (typeof fn?.thought_signature === "string" && fn.thought_signature) {
+    return fn.thought_signature;
+  }
+  return undefined;
+}
+
 /** 把内部消息格式序列化为 OpenAI Chat Completions wire format。 */
-function toChatWire(m: ChatMessage): OpenAI.ChatCompletionMessageParam {
+function toChatWire(m: ChatMessage, config: LLMConfig): OpenAI.ChatCompletionMessageParam {
   switch (m.role) {
     case "system":
     case "user":
       return { role: m.role, content: m.content };
-    case "assistant":
+    case "assistant": {
+      const hasAnySig = m.toolCalls?.some((tc) => Boolean(tc.thoughtSignature)) ?? false;
+      const isGemini =
+        /gemini/i.test(config.model) || /generativelanguage\.googleapis\.com/i.test(config.baseURL);
       return {
         role: "assistant",
         content: m.content,
         ...(m.toolCalls?.length
           ? {
-              tool_calls: m.toolCalls.map((tc) => ({
-                id: tc.id,
-                type: "function",
-                function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-              })),
+              tool_calls: m.toolCalls.map((tc, i) => {
+                // Gemini 要求同回合的每次函数调用都带回 thought_signature（并行调用仅首个带签名）；
+                // 若中转剥离了响应里的签名，则按 Google 文档回填官方跳过校验哨兵值。
+                const sig =
+                  tc.thoughtSignature ??
+                  (!hasAnySig && isGemini && i === 0
+                    ? "skip_thought_signature_validator"
+                    : undefined);
+                return {
+                  id: tc.id,
+                  type: "function" as const,
+                  function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+                  ...(sig ? { extra_content: { google: { thought_signature: sig } } } : {}),
+                };
+              }),
             }
           : {}),
       };
+    }
     case "tool":
       return { role: "tool", tool_call_id: m.toolCallId, content: m.content };
   }
@@ -78,7 +120,7 @@ function buildChatParams(
 ): OpenAI.ChatCompletionCreateParamsNonStreaming {
   return {
     model: config.model,
-    messages: messages.map(toChatWire),
+    messages: messages.map((m) => toChatWire(m, config)),
     temperature: config.temperature,
     max_tokens: config.maxTokens,
     reasoning_effort: config.reasoningEffort,
@@ -165,7 +207,7 @@ function buildResponsesParams(
 }
 
 function finalizeToolCalls(
-  acc: Map<number, { id: string; name: string; arguments: string }>,
+  acc: Map<number, { id: string; name: string; arguments: string; thoughtSignature?: string }>,
 ): ToolCall[] {
   return [...acc.values()].map((s, i) => {
     let args: Record<string, unknown> = {};
@@ -174,7 +216,12 @@ function finalizeToolCalls(
     } catch {
       // 非法 JSON 交给 handler 报错
     }
-    return { id: s.id || `call_${i}`, name: s.name, args };
+    return {
+      id: s.id || `call_${i}`,
+      name: s.name,
+      args,
+      ...(s.thoughtSignature ? { thoughtSignature: s.thoughtSignature } : {}),
+    };
   });
 }
 
@@ -232,8 +279,11 @@ async function* streamChatCompletions(
     },
     { signal: opts?.signal },
   );
-  // tool_calls 增量累积：按 index 聚合 id/name/arguments 分片
-  const acc = new Map<number, { id: string; name: string; arguments: string }>();
+  // tool_calls 增量累积：按 index 聚合 id/name/arguments/thoughtSignature 分片
+  const acc = new Map<
+    number,
+    { id: string; name: string; arguments: string; thoughtSignature?: string }
+  >();
   for await (const chunk of stream) {
     const choice = chunk.choices[0];
     const delta = choice?.delta;
@@ -247,12 +297,15 @@ async function* streamChatCompletions(
           ? ext.reasoning
           : "";
     if (r) yield { type: "reasoning", delta: r };
-    for (const tc of delta?.tool_calls ?? []) {
-      const slot = acc.get(tc.index) ?? { id: "", name: "", arguments: "" };
+    for (const [i, tc] of (delta?.tool_calls ?? []).entries()) {
+      const idx = typeof tc.index === "number" ? tc.index : i;
+      const slot = acc.get(idx) ?? { id: "", name: "", arguments: "" };
       if (tc.id) slot.id = tc.id;
       if (tc.function?.name) slot.name += tc.function.name;
       if (tc.function?.arguments) slot.arguments += tc.function.arguments;
-      acc.set(tc.index, slot);
+      const sig = extractThoughtSignature(tc) ?? (idx === 0 ? extractThoughtSignature(delta) : undefined);
+      if (sig && !slot.thoughtSignature) slot.thoughtSignature = sig;
+      acc.set(idx, slot);
     }
   }
   if (acc.size > 0) {
