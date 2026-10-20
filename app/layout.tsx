@@ -13,17 +13,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "世界线收束物语",
-  description: "命运石之门式世界线收束互动故事：你的选择会改变世界线，但世界线会反抗。",
+  title: "命运石之门 · STEINS;GATE",
+  description: "一切都是命运石之门的选择——世界线收束与跃迁互动剧。",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className="min-h-screen bg-paper text-ink selection:bg-vermilion/15 selection:text-vermilion">
+        {children}
+      </body>
     </html>
   );
 }

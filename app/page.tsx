@@ -6,7 +6,13 @@ import { GameEngine } from "./llm/engine";
 import { chat } from "./llm/llm";
 import { buildPlayerPrompt, type PlayerStyleId } from "./llm/prompts/player";
 import type { Ending, GameSetup, GmDebugEvent, LLMConfig, Scene } from "./llm/types";
-import { EMPTY_CONFIG } from "./components/ConfigForm";
+import {
+  createDefaultSettingsState,
+  loadModelSettings,
+  resolveRoleConfig,
+  saveModelSettings,
+  type ModelSettingsState,
+} from "./components/ConfigForm";
 import { TopBar } from "./components/TopBar";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { SetupPanel } from "./components/SetupPanel";
@@ -20,19 +26,10 @@ function formatScene(s: Scene): string {
   return `${s.narration}\n\n${opts}\n\n（或者自由输入任何行动。）`;
 }
 
-function loadJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return { ...fallback, ...JSON.parse(raw) };
-  } catch {
-    /* localStorage 不可用时用回退值 */
-  }
-  return fallback;
-}
-
 export default function Home() {
-  const [gmConfig, setGmConfig] = useState<LLMConfig>(EMPTY_CONFIG);
-  const [playerConfig, setPlayerConfig] = useState<LLMConfig>(EMPTY_CONFIG);
+  const [settings, setSettings] = useState<ModelSettingsState>(createDefaultSettingsState);
+  const gmConfig = resolveRoleConfig(settings, "gm");
+  const playerConfig = resolveRoleConfig(settings, "player");
   const [mode, setMode] = useState<Mode>("play");
   const [genre, setGenre] = useState("");
   const [protagonist, setProtagonist] = useState("");
@@ -62,21 +59,13 @@ export default function Home() {
 
   useEffect(() => {
     // localStorage 只在客户端可用，必须在挂载后读取（SSR 时没有 window）
-    const gm = loadJSON("sg:gm", EMPTY_CONFIG);
+    const loaded = loadModelSettings();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setGmConfig(gm);
-    setPlayerConfig(loadJSON("sg:player", EMPTY_CONFIG));
+    setSettings(loaded);
+    const gm = resolveRoleConfig(loaded, "gm");
     // 「展示隐藏状态」不持久化：每次进页面默认关闭，防止意外剧透
     if (!gm.baseURL) setDrawerOpen(true);
   }, []);
-
-  const save = (key: string, v: unknown) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(v));
-    } catch {
-      /* ignore */
-    }
-  };
 
   const test = async (c: LLMConfig, setTesting: (b: boolean) => void) => {
     setTesting(true);
@@ -120,9 +109,7 @@ export default function Home() {
       text: action,
       by: "player-agent",
       // 无思维链则不展示附注（直接没有，不留占位）
-      ...(reasoning
-        ? { debug: { events: [{ type: "reasoning" as const, text: reasoning }], state: null } }
-        : {}),
+      ...(reasoning ? { debug: { events: [{ type: "reasoning" as const, text: reasoning }], state: null } } : {}),
     });
     return action;
   };
@@ -145,8 +132,7 @@ export default function Home() {
     const engine = new GameEngine(gmConfig);
     engineRef.current = engine;
     // 观战模式：玩家侧也是一个 agent，由页面持有，作为 onScene 的输入来源
-    const player =
-      mode === "spectate" ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player") : null;
+    const player = mode === "spectate" ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player") : null;
     const setup: GameSetup = { genre, protagonist, difficulty };
     try {
       await engine.play(setup, {
@@ -241,7 +227,7 @@ export default function Home() {
   const showCover = entries.length === 0 && !live && !busy && !stopped && !gameOver;
 
   return (
-    <main className="mx-auto flex h-screen w-full max-w-3xl flex-col gap-3 p-4 text-ink">
+    <div className="flex min-h-screen flex-col">
       <TopBar
         difficulty={difficulty}
         onDifficulty={setDifficulty}
@@ -254,61 +240,55 @@ export default function Home() {
         onShowHidden={setShowHidden}
         drawerOpen={drawerOpen}
         onToggleDrawer={() => setDrawerOpen((v) => !v)}
+        gmModelName={gmConfig.model}
       />
 
       {drawerOpen && (
         <SettingsDrawer
-          gmConfig={gmConfig}
-          onGmConfig={(c) => {
-            setGmConfig(c);
-            save("sg:gm", c);
+          settings={settings}
+          onChange={(next) => {
+            setSettings(next);
+            saveModelSettings(next);
           }}
-          playerConfig={playerConfig}
-          onPlayerConfig={(c) => {
-            setPlayerConfig(c);
-            save("sg:player", c);
-          }}
+          onClose={() => setDrawerOpen(false)}
           onTest={(c, which) => test(c, which === "gm" ? setTestingGm : setTestingPlayer)}
           testingGm={testingGm}
           testingPlayer={testingPlayer}
         />
       )}
 
-      <div className="min-h-0 flex-1">
-        {showCover ? (
-          <SetupPanel
-            mode={mode}
-            onMode={setMode}
-            genre={genre}
-            onGenre={setGenre}
-            protagonist={protagonist}
-            onProtagonist={setProtagonist}
-            playerStyle={playerStyle}
-            onPlayerStyle={setPlayerStyle}
-            canStart={canStart}
-            onStart={startGame}
-            onOpenSettings={() => setDrawerOpen(true)}
-          />
-        ) : (
-          <StoryLog
-            entries={entries}
-            live={live}
-            playerLive={playerLive}
-            showHidden={showHidden}
-          />
-        )}
-      </div>
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-2.5 px-3 py-2.5 sm:px-4">
+        <div className="flex-1">
+          {showCover ? (
+            <SetupPanel
+              mode={mode}
+              onMode={setMode}
+              genre={genre}
+              onGenre={setGenre}
+              protagonist={protagonist}
+              onProtagonist={setProtagonist}
+              playerStyle={playerStyle}
+              onPlayerStyle={setPlayerStyle}
+              canStart={canStart}
+              onStart={startGame}
+              onOpenSettings={() => setDrawerOpen(true)}
+            />
+          ) : (
+            <StoryLog entries={entries} live={live} playerLive={playerLive} showHidden={showHidden} />
+          )}
+        </div>
 
-      <BottomDock
-        mode={mode}
-        busy={busy}
-        gameOver={gameOver}
-        waitingInput={waitingInput}
-        playerThinking={playerLive !== null}
-        options={lastScene?.options ?? []}
-        onSubmit={act}
-        onRestart={startGame}
-      />
-    </main>
+        <BottomDock
+          mode={mode}
+          busy={busy}
+          gameOver={gameOver}
+          waitingInput={waitingInput}
+          playerThinking={playerLive !== null}
+          options={lastScene?.options ?? []}
+          onSubmit={act}
+          onRestart={startGame}
+        />
+      </main>
+    </div>
   );
 }

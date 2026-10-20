@@ -12,110 +12,141 @@ export interface LivePlayer {
   reasoning: string;
 }
 
+const STICK_THRESHOLD_PX = 64;
+
+function isWindowNearBottom(scrollHeight?: number): boolean {
+  const doc = document.documentElement;
+  const h = scrollHeight ?? doc.scrollHeight;
+  return h - window.scrollY - window.innerHeight < STICK_THRESHOLD_PX;
+}
+
+function scrollToPageBottom(): void {
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+}
+
 export function StoryLog(props: {
   entries: Entry[];
   live: LiveGM | null;
   playerLive: LivePlayer | null;
   showHidden: boolean;
 }) {
-  const logRef = useRef<HTMLDivElement>(null);
-  /** 上一 commit 的 scrollHeight：内容追加前的容器高度 */
+  const containerRef = useRef<HTMLDivElement>(null);
+  /** 上一 commit 的文档高度：内容追加前的整页高度 */
   const prevHeightRef = useRef<number | null>(null);
-  /** 上次已知的贴底状态：内容 effect 与用户滚动都会更新它，供 resize 时判定 */
+  /** 上次已知的整页贴底状态 */
   const stickRef = useRef(true);
 
-  // 内容追加：按吐字前几何判定（不等异步 scroll 事件）
+  // 监听整页滚动，记录用户是否停留在页面底部附近
   useEffect(() => {
-    const el = logRef.current;
-    if (!el) return;
-    const prevH = prevHeightRef.current ?? el.scrollHeight;
-    const wasAtBottom = prevH - el.scrollTop - el.clientHeight < 10;
+    const onScroll = () => {
+      stickRef.current = isWindowNearBottom();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // 内容追加：按追加前的整页几何判定是否自动跟随到底部
+  useEffect(() => {
+    const doc = document.documentElement;
+    const prevH = prevHeightRef.current ?? doc.scrollHeight;
+    const wasAtBottom = isWindowNearBottom(prevH);
     stickRef.current = wasAtBottom;
-    if (wasAtBottom) el.scrollTo(0, el.scrollHeight);
-    prevHeightRef.current = el.scrollHeight;
+    if (wasAtBottom) scrollToPageBottom();
+    prevHeightRef.current = doc.scrollHeight;
   }, [props.entries, props.live, props.playerLive]);
 
-  // 容器尺寸变化（底栏弹出/收起、窗口缩放）：跟随上次已知的贴底状态
+  // 页面内容尺寸变化（底栏展开/收起、详情折叠、窗口缩放）：跟随上次已知贴底状态
   useEffect(() => {
-    const el = logRef.current;
+    const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      if (stickRef.current) el.scrollTo(0, el.scrollHeight);
-      prevHeightRef.current = el.scrollHeight;
+      if (stickRef.current) scrollToPageBottom();
+      prevHeightRef.current = document.documentElement.scrollHeight;
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   return (
-    <div
-      ref={logRef}
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 10;
-      }}
-      className="flex h-full flex-col gap-5 overflow-y-auto rounded border border-line bg-card p-5"
-    >
+    <div ref={containerRef} className="flex flex-col gap-2.5">
       {props.entries.map((e, i) => {
         if (e.kind === "scene") {
           return (
-            <section key={i}>
-              {props.showHidden && <DebugNote info={e.debug} />}
-              <div className="mt-2 font-serif leading-relaxed whitespace-pre-wrap text-ink">
-                {e.narration}
+            <article
+              key={i}
+              className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs print:break-inside-avoid print:shadow-none"
+            >
+              <div className="mb-1.5 flex items-center justify-between border-b border-line/60 pb-1">
+                <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-ink-soft">
+                  <span className="h-1.5 w-1.5 rounded-full bg-vermilion/80" />
+                  <span>第 {e.act} 幕</span>
+                </span>
+                <span className="font-mono text-[11px] text-ink-soft/60">ACT {String(e.act).padStart(2, "0")}</span>
               </div>
-            </section>
+
+              {props.showHidden && <DebugNote info={e.debug} />}
+
+              <div className="font-serif text-[15.5px] leading-[1.75] whitespace-pre-wrap text-ink">{e.narration}</div>
+            </article>
           );
         }
+
         if (e.kind === "action") {
           return (
-            <section key={i}>
-              {props.showHidden && e.debug && e.debug.events.length > 0 && (
-                <DebugNote info={e.debug} />
-              )}
-              <div className="mt-2 border-l-2 border-vermilion pl-3">
-                {e.by === "human" && (
-                  <span className="mr-2 text-xs text-ink-soft">你的行动</span>
-                )}
-                <span className="whitespace-pre-wrap text-vermilion">{e.text}</span>
+            <div key={i} className="print:break-inside-avoid">
+              {props.showHidden && e.debug && e.debug.events.length > 0 && <DebugNote info={e.debug} />}
+              <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/[0.04] px-3 py-1.5 text-sm">
+                <span className="font-serif whitespace-pre-wrap text-vermilion">{e.text}</span>
               </div>
-            </section>
+            </div>
           );
         }
+
         if (e.kind === "ending") {
           return (
-            <section key={i}>
+            <article
+              key={i}
+              className="rounded-xl border-2 border-vermilion bg-card px-4 py-3.5 shadow-xs print:break-inside-avoid print:shadow-none"
+            >
               {props.showHidden && <DebugNote info={e.debug} />}
-              <div className="mt-2 rounded border-2 border-vermilion bg-paper-dim p-4">
-                <h2 className="mb-2 font-serif font-bold text-vermilion">{e.title}</h2>
-                <div className="font-serif text-sm leading-relaxed whitespace-pre-wrap text-ink">
-                  {e.yearbook}
-                </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-vermilion/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-vermilion">
+                  终局年鉴
+                </span>
+                <h2 className="font-serif text-lg font-bold text-vermilion">{e.title}</h2>
               </div>
-            </section>
+              <div className="mt-2 border-t border-line pt-2 font-serif text-[15px] leading-[1.75] whitespace-pre-wrap text-ink">
+                {e.yearbook}
+              </div>
+            </article>
           );
         }
+
         return (
-          <section key={i} className="text-vermilion">
-            ⚠ {e.text}
-          </section>
+          <div
+            key={i}
+            className="flex items-start gap-2 rounded-lg border border-vermilion/30 bg-vermilion/10 px-3 py-2 text-xs text-vermilion sm:text-sm"
+          >
+            <span className="shrink-0 font-bold">⚠</span>
+            <span className="whitespace-pre-wrap">{e.text}</span>
+          </div>
         );
       })}
 
       {props.live && (
-        <section>
+        <article className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs">
           {props.showHidden && props.live.events.length > 0 && (
             <DebugNote live info={{ events: props.live.events, state: null }} />
           )}
-          <div className="mt-2 font-serif leading-relaxed whitespace-pre-wrap text-ink">
+          <div className="font-serif text-[15.5px] leading-[1.75] whitespace-pre-wrap text-ink">
             {props.live.narration}
-            <span className="animate-caret text-vermilion">▌</span>
+            <span className="animate-caret ml-0.5 text-vermilion">▌</span>
           </div>
-        </section>
+        </article>
       )}
 
       {props.playerLive && (
-        <section>
+        <div>
           {props.showHidden && props.playerLive.reasoning && (
             <DebugNote
               live
@@ -125,13 +156,13 @@ export function StoryLog(props: {
               }}
             />
           )}
-          <div className="mt-2 border-l-2 border-vermilion pl-3">
-            <span className="whitespace-pre-wrap text-vermilion">
+          <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/[0.04] px-3 py-1.5 text-sm">
+            <span className="font-serif whitespace-pre-wrap text-vermilion">
               {props.playerLive.text}
-              <span className="animate-caret">▌</span>
+              <span className="animate-caret ml-0.5 text-vermilion">▌</span>
             </span>
           </div>
-        </section>
+        </div>
       )}
     </div>
   );

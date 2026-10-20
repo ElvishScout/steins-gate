@@ -7,15 +7,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* 观测者年鉴：浅色纸面，强制浅色（不做 dark 覆写） */
+/* 现代观测者年鉴主题：干净的暖白纸感 + 高对比石墨字色 + 朱砂红强调色 */
 @theme {
-  --color-paper: #f6f1e5;
-  --color-card: #fbf8ef;
-  --color-paper-dim: #ede6d3;
-  --color-ink: #2b2620;
-  --color-ink-soft: #7a6f5c;
-  --color-vermilion: #b03a2c;
-  --color-line: #d9cfb8;
+  --color-paper: #f7f6f2;
+  --color-card: #ffffff;
+  --color-paper-dim: #efede6;
+  --color-ink: #18181b;
+  --color-ink-soft: #6b6860;
+  --color-vermilion: #d93829;
+  --color-line: #e4e1d8;
 
   /* 流式光标：硬切换闪烁（animate-caret） */
   --animate-caret: caret-blink 0.9s step-end infinite;
@@ -32,11 +32,22 @@
 }
 
 :root {
-  --background: #f6f1e5;
-  --foreground: #2b2620;
+  --background: #f7f6f2;
+  --foreground: #18181b;
+}
+
+html {
+  scroll-behavior: auto;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+@media print {
+  body {
+    background: #ffffff;
+  }
 }
