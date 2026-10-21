@@ -74,7 +74,7 @@ export function StoryLog(props: {
           return (
             <article
               key={i}
-              className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs print:break-inside-avoid print:shadow-none"
+              className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs print:shadow-none"
             >
               <div className="mb-1.5 flex items-center justify-between border-b border-line/60 pb-1">
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-ink-soft">
@@ -93,7 +93,7 @@ export function StoryLog(props: {
 
         if (e.kind === "action") {
           return (
-            <div key={i} className="print:break-inside-avoid">
+            <div key={i}>
               {props.showHidden && e.debug && e.debug.events.length > 0 && <DebugNote info={e.debug} />}
               <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/[0.04] px-3 py-1.5 text-sm">
                 <span className="font-serif whitespace-pre-wrap text-vermilion">{e.text}</span>
@@ -106,7 +106,7 @@ export function StoryLog(props: {
           return (
             <article
               key={i}
-              className="rounded-xl border-2 border-vermilion bg-card px-4 py-3.5 shadow-xs print:break-inside-avoid print:shadow-none"
+              className="rounded-xl border-2 border-vermilion bg-card px-4 py-3.5 shadow-xs print:shadow-none"
             >
               {props.showHidden && <DebugNote info={e.debug} />}
               <div className="flex items-center gap-2">
