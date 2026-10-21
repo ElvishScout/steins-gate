@@ -64,6 +64,8 @@ export interface GmInternals {
   state: GmState;
   /** 当前难度的贴线脆弱阈值（当前 1% 区间内的占比，如 0.75 / 0.80 / 0.90） */
   fragileRatio: number;
+  /** 本局已加载的专题规则模块 */
+  loadedSkills: Set<GmSkillId>;
   /** 本幕是否已结算（settle 幂等约束；present_options/declare_ending 成功时复位） */
   settledThisAct: boolean;
   /** 当前收束范围已进行的幕数（节奏判定用；跃迁时清零，state.act 是全剧累计不清零） */
@@ -91,6 +93,7 @@ export function freshInternals(difficulty: Difficulty = "standard"): GmInternals
       ending: null,
     },
     fragileRatio: profile.fragileRatio,
+    loadedSkills: new Set(),
     settledThisAct: false,
     actsThisLine: 0,
     options: null,
@@ -388,7 +391,7 @@ export function createGmTools(
         type: "object",
         properties: {
           id: { type: "string" },
-          status: { type: "string", enum: ["triggered", "deceived", "void"] },
+          status: { type: "string", enum: ["pending", "triggered", "deceived", "void"] },
           note: { type: "string", description: "触发或欺骗的具体实现过程" },
         },
         required: ["id", "status"],
@@ -396,6 +399,11 @@ export function createGmTools(
       run(args) {
         const cp = gm.state.checkpoints.find((c) => c.id === args.id);
         if (!cp) throw new Error(`找不到检查点 ${String(args.id)}`);
+        if (!gm.loadedSkills.has("reading-steiner") && (args.status === "pending" || cp.status !== "pending")) {
+          throw new Error(
+            `检查点 ${cp.id} 当前已是 ${cp.status} 状态，常规模式下不可回溯或重置检查点。`,
+          );
+        }
         if (args.status === "deceived") {
           if (!cp.conditions.some((x) => x.via === "cognition")) {
             throw new Error(
@@ -462,7 +470,7 @@ export function createGmTools(
       run(args) {
         const s = gm.state;
         const jr = jumpReadiness(s, gm.fragileRatio);
-        if (!jr.ready) {
+        if (!jr.ready && !gm.loadedSkills.has("reading-steiner")) {
           throw new Error(
             `因果链尚可自洽，不许跃迁（未消化根本矛盾×${jr.activeFundamental}${jr.fragile ? "，贴线脆弱" : ""}）。跳线的唯一条件是矛盾：根本矛盾通常需积累 2 个以上，贴线脆弱（读数达到当前区间 ${Math.round(gm.fragileRatio * 100)}%）时 1 个即可，或直接击穿核心节点。细微/显著矛盾无论积累多少都永不跳线。`,
           );
@@ -594,6 +602,7 @@ export function createGmTools(
         if (!skill) {
           throw new Error(`未知模块 "${id}"，可选值：${Object.keys(GM_SKILLS).join(" / ")}`);
         }
+        gm.loadedSkills.add(id);
         return skill.content;
       },
     },
