@@ -1,7 +1,24 @@
-import type { ChatMessage, ToolCall } from "../types";
+import type { ChatMessage, LLMConfig, ToolCall } from "../types";
+
+/** 客户端标识：符合 OpenCode Go 等网关对独立 Coding Agent User-Agent 的要求 */
+export const CLIENT_USER_AGENT = "steins-gate-agent/0.1.0";
 
 export interface CallOptions {
   signal?: AbortSignal;
+  /** 稳定的会话 ID（写入 x-opencode-session，用于路由粘性与 Prompt Caching） */
+  sessionId?: string;
+}
+
+export function isOpenCodeEndpoint(baseURL: string): boolean {
+  return /opencode\.ai/i.test(baseURL);
+}
+
+/** 构造所有 LLM 请求共用的客户端标识与会话头（x-opencode-session 仅在检测到 opencode 时注入） */
+export function buildClientHeaders(config: LLMConfig, sessionId?: string): Record<string, string> {
+  return {
+    "User-Agent": CLIENT_USER_AGENT,
+    ...(isOpenCodeEndpoint(config.baseURL) && sessionId ? { "x-opencode-session": sessionId } : {}),
+  };
 }
 
 export interface ToolSpec {
@@ -48,8 +65,7 @@ export function wrapError(err: unknown): LLMError {
  * OpenAI SDK 与 Google GenAI SDK 都接受自定义 fetch，因此 CORS 方案只需维护这一份。
  */
 export const proxyFetch: typeof fetch = (input, init) => {
-  const target =
-    typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const headers = new Headers(init?.headers);
   headers.set("x-target-url", target);
   return fetch("/api/proxy", { ...init, headers });

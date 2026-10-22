@@ -3,6 +3,7 @@ import { streamChatCompletions } from "./protocols/openai-chat";
 import { streamResponses } from "./protocols/openai-responses";
 import {
   LLMError,
+  isOpenCodeEndpoint,
   wrapError,
   type CallOptions,
   type StreamEvent,
@@ -22,7 +23,8 @@ export async function chat(
   let content = "";
   let reasoning = "";
   let toolCalls: ToolCall[] = [];
-  for await (const ev of streamTurn(config, messages, opts)) {
+  const sessionId = opts?.sessionId ?? crypto.randomUUID();
+  for await (const ev of streamTurn(config, messages, { ...opts, sessionId })) {
     if (ev.type === "text") content += ev.delta;
     else if (ev.type === "reasoning") reasoning += ev.delta;
     else if (ev.type === "tool_calls") toolCalls = ev.toolCalls;
@@ -41,6 +43,9 @@ export async function* streamTurn(
   opts?: CallOptions & { tools?: ToolSpec[] },
 ): AsyncIterable<StreamEvent> {
   try {
+    if (isOpenCodeEndpoint(config.baseURL) && !config.useProxy) {
+      throw new LLMError("使用 OpenCode 端点时需勾选「使用 API 代理」");
+    }
     switch (config.protocol) {
       case "gemini":
         yield* streamGemini(config, messages, opts);

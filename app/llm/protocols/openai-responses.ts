@@ -1,13 +1,7 @@
 import type OpenAI from "openai";
 import type { ChatMessage, LLMConfig } from "../types";
 import { makeOpenAIClient } from "./openai-client";
-import {
-  LLMError,
-  finalizeToolCalls,
-  type CallOptions,
-  type StreamEvent,
-  type ToolSpec,
-} from "./shared";
+import { LLMError, finalizeToolCalls, type CallOptions, type StreamEvent, type ToolSpec } from "./shared";
 
 /** 把内部消息格式序列化为 OpenAI Responses API 的 instructions + input items。 */
 function toResponsesInput(messages: ChatMessage[]): {
@@ -85,7 +79,7 @@ export async function* streamResponses(
   messages: ChatMessage[],
   opts?: CallOptions & { tools?: ToolSpec[] },
 ): AsyncIterable<StreamEvent> {
-  const stream = await makeOpenAIClient(config).responses.create(
+  const stream = await makeOpenAIClient(config, opts?.sessionId).responses.create(
     buildResponsesParams(config, messages, opts?.tools),
     { signal: opts?.signal },
   );

@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { CLIENT_USER_AGENT } from "@/app/llm/protocols/shared";
 
 /** 不应转发给上游 LLM 端点的请求头（浏览器特征头、逐跳头、代理自用头） */
 const STRIP_REQ_HEADERS = new Set([
@@ -9,6 +10,7 @@ const STRIP_REQ_HEADERS = new Set([
   "origin",
   "referer",
   "cookie",
+  "user-agent",
   "x-target-url",
 ]);
 
@@ -54,6 +56,7 @@ async function handleProxy(req: NextRequest): Promise<Response> {
       upstreamHeaders.set(key, value);
     }
   });
+  upstreamHeaders.set("user-agent", CLIENT_USER_AGENT);
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const body = hasBody ? await req.arrayBuffer() : undefined;

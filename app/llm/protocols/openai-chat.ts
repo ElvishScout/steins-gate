@@ -1,12 +1,7 @@
 import type OpenAI from "openai";
 import type { ChatMessage, LLMConfig } from "../types";
 import { makeOpenAIClient } from "./openai-client";
-import {
-  finalizeToolCalls,
-  type CallOptions,
-  type StreamEvent,
-  type ToolSpec,
-} from "./shared";
+import { finalizeToolCalls, type CallOptions, type StreamEvent, type ToolSpec } from "./shared";
 
 /** 提取 Gemini OpenAI 兼容层在 tool_call 或 delta 上携带的 thought_signature。 */
 function extractThoughtSignature(obj: unknown): string | undefined {
@@ -35,8 +30,7 @@ function toChatWire(m: ChatMessage, config: LLMConfig): OpenAI.ChatCompletionMes
       return { role: m.role, content: m.content };
     case "assistant": {
       const hasAnySig = m.toolCalls?.some((tc) => Boolean(tc.thoughtSignature)) ?? false;
-      const isGemini =
-        /gemini/i.test(config.model) || /generativelanguage\.googleapis\.com/i.test(config.baseURL);
+      const isGemini = /gemini/i.test(config.model) || /generativelanguage\.googleapis\.com/i.test(config.baseURL);
       return {
         role: "assistant",
         content: m.content,
@@ -47,9 +41,7 @@ function toChatWire(m: ChatMessage, config: LLMConfig): OpenAI.ChatCompletionMes
                 // 若中转剥离了响应里的签名，则按 Google 文档回填官方跳过校验哨兵值。
                 const sig =
                   tc.thoughtSignature ??
-                  (!hasAnySig && isGemini && i === 0
-                    ? "skip_thought_signature_validator"
-                    : undefined);
+                  (!hasAnySig && isGemini && i === 0 ? "skip_thought_signature_validator" : undefined);
                 return {
                   id: tc.id,
                   type: "function" as const,
@@ -93,7 +85,7 @@ export async function* streamChatCompletions(
   messages: ChatMessage[],
   opts?: CallOptions & { tools?: ToolSpec[] },
 ): AsyncIterable<StreamEvent> {
-  const client = makeOpenAIClient(config);
+  const client = makeOpenAIClient(config, opts?.sessionId);
   const stream = await client.chat.completions.create(
     {
       ...buildChatParams(config, messages, opts?.tools),
@@ -102,10 +94,7 @@ export async function* streamChatCompletions(
     { signal: opts?.signal },
   );
   // tool_calls 增量累积：按 index 聚合 id/name/arguments/thoughtSignature 分片
-  const acc = new Map<
-    number,
-    { id: string; name: string; arguments: string; thoughtSignature?: string }
-  >();
+  const acc = new Map<number, { id: string; name: string; arguments: string; thoughtSignature?: string }>();
   for await (const chunk of stream) {
     const choice = chunk.choices[0];
     const delta = choice?.delta;
@@ -125,8 +114,7 @@ export async function* streamChatCompletions(
       if (tc.id) slot.id = tc.id;
       if (tc.function?.name) slot.name += tc.function.name;
       if (tc.function?.arguments) slot.arguments += tc.function.arguments;
-      const sig =
-        extractThoughtSignature(tc) ?? (idx === 0 ? extractThoughtSignature(delta) : undefined);
+      const sig = extractThoughtSignature(tc) ?? (idx === 0 ? extractThoughtSignature(delta) : undefined);
       if (sig && !slot.thoughtSignature) slot.thoughtSignature = sig;
       acc.set(idx, slot);
     }

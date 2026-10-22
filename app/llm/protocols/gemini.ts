@@ -10,6 +10,7 @@ import {
 import type { ChatMessage, LLMConfig } from "../types";
 import {
   LLMError,
+  buildClientHeaders,
   collectSystem,
   finalizeToolCalls,
   proxyFetch,
@@ -28,22 +29,23 @@ const SYNTHETIC_CALL_ID = /^call_\d+$/;
  * baseURL 与 OpenAI 协议一致，填完整 API 根（如 https://generativelanguage.googleapis.com/v1beta）。
  * apiVersion 置空可让 SDK 原样使用该 URL，不再追加默认的 /v1beta。
  */
-function buildHttpOptions(config: LLMConfig): HttpOptions | undefined {
-  const options: HttpOptions = {};
+function buildHttpOptions(config: LLMConfig, sessionId?: string): HttpOptions {
+  const options: HttpOptions = {
+    headers: buildClientHeaders(config, sessionId),
+  };
   const base = config.baseURL.trim();
   if (base) {
     options.baseUrl = base;
     options.apiVersion = "";
   }
   if (config.useProxy) options.fetch = proxyFetch;
-  return Object.keys(options).length > 0 ? options : undefined;
+  return options;
 }
 
-function makeClient(config: LLMConfig): GoogleGenAI {
-  const httpOptions = buildHttpOptions(config);
+function makeClient(config: LLMConfig, sessionId?: string): GoogleGenAI {
   return new GoogleGenAI({
     apiKey: config.apiKey,
-    ...(httpOptions ? { httpOptions } : {}),
+    httpOptions: buildHttpOptions(config, sessionId),
   });
 }
 
@@ -112,9 +114,7 @@ function toGeminiContents(messages: ChatMessage[]): {
         calls.forEach((tc, i) => {
           toolNames.set(tc.id, tc.name);
           // 并行调用只有首个带签名；签名全部缺失时回填哨兵值以跳过校验
-          const signature =
-            tc.thoughtSignature ??
-            (!hasAnySignature && i === 0 ? SKIP_SIGNATURE : undefined);
+          const signature = tc.thoughtSignature ?? (!hasAnySignature && i === 0 ? SKIP_SIGNATURE : undefined);
           parts.push({
             functionCall: {
               name: tc.name,
@@ -206,7 +206,7 @@ export async function* streamGemini(
   opts?: CallOptions & { tools?: ToolSpec[] },
 ): AsyncIterable<StreamEvent> {
   const { systemInstruction, contents } = toGeminiContents(messages);
-  const stream = await makeClient(config).models.generateContentStream({
+  const stream = await makeClient(config, opts?.sessionId).models.generateContentStream({
     model: config.model,
     contents,
     config: buildConfig(config, systemInstruction, opts?.tools, opts?.signal),

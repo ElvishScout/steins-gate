@@ -16,6 +16,8 @@ const noop = () => {};
  */
 export class Agent {
   readonly name: string;
+  /** 同一条对话上下文（整局 GM 或整局 Player）保持恒定的会话 ID，供 x-opencode-session 路由与缓存复用 */
+  sessionId: string = crypto.randomUUID();
   history: ChatMessage[] = [];
 
   constructor(
@@ -60,6 +62,7 @@ export class Agent {
       for await (const ev of streamTurn(this.config, this.history, {
         signal: opts?.signal,
         tools: opts?.tools,
+        sessionId: this.sessionId,
       })) {
         if (ev.type === "text") {
           roundText += ev.delta;
@@ -116,7 +119,10 @@ export class Agent {
     this.history.push({ role: "user", content: userInput });
     let text = "";
     let thoughtSignature: string | undefined;
-    for await (const ev of streamTurn(this.config, this.history, { signal: opts?.signal })) {
+    for await (const ev of streamTurn(this.config, this.history, {
+      signal: opts?.signal,
+      sessionId: this.sessionId,
+    })) {
       if (ev.type === "text") {
         text += ev.delta;
         opts?.onText?.(ev.delta);
@@ -135,6 +141,7 @@ export class Agent {
   }
 
   reset(systemPrompt?: string): void {
+    this.sessionId = crypto.randomUUID();
     this.history = [];
     if (systemPrompt !== undefined) {
       this.history.push({ role: "system", content: systemPrompt });
