@@ -34,27 +34,18 @@ const STRIP_RES_HEADERS = new Set([
 async function handleProxy(req: NextRequest): Promise<Response> {
   const rawTarget = req.headers.get("x-target-url") ?? req.nextUrl.searchParams.get("url");
   if (!rawTarget) {
-    return Response.json(
-      { error: { message: "代理请求缺少目标地址（x-target-url）" } },
-      { status: 400 },
-    );
+    return Response.json({ error: { message: "代理请求缺少目标地址（x-target-url）" } }, { status: 400 });
   }
 
   let targetUrl: URL;
   try {
     targetUrl = new URL(rawTarget);
   } catch {
-    return Response.json(
-      { error: { message: `无效的目标 URL：${rawTarget}` } },
-      { status: 400 },
-    );
+    return Response.json({ error: { message: `无效的目标 URL：${rawTarget}` } }, { status: 400 });
   }
 
   if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
-    return Response.json(
-      { error: { message: `不支持的协议：${targetUrl.protocol}` } },
-      { status: 400 },
-    );
+    return Response.json({ error: { message: `不支持的协议：${targetUrl.protocol}` } }, { status: 400 });
   }
 
   const upstreamHeaders = new Headers();

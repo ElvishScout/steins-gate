@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LLMConfig } from "../llm/types";
+import type { LLMConfig, LLMProtocol } from "../llm/types";
 import {
   createEmptyProvider,
   resolveRoleConfig,
@@ -7,6 +7,12 @@ import {
   type ProviderConfig,
   type RoleAssignment,
 } from "./ConfigForm";
+
+const PROTOCOL_OPTIONS: { value: LLMProtocol; label: string }[] = [
+  { value: "openai-chat", label: "OpenAI · Chat Completions" },
+  { value: "openai-responses", label: "OpenAI · Responses API" },
+  { value: "gemini", label: "Gemini · Generate Content" },
+];
 
 interface ModelOption {
   value: string; // `${providerId}::${model}`
@@ -35,20 +41,21 @@ function RoleSelectorCard(props: {
   title: string;
   badge: string;
   assignment: RoleAssignment;
-  resolved: LLMConfig;
+  resolved: LLMConfig | null;
   options: ModelOption[];
   onChange: (next: RoleAssignment) => void;
   onTest: () => void;
   testing: boolean;
 }) {
   const { title, badge, assignment, resolved, options, onChange } = props;
+  const resolvedModel = resolved?.model;
   const currentKey =
-    resolved.model && options.some((o) => o.providerId === assignment.providerId && o.model === resolved.model)
-      ? `${assignment.providerId}::${resolved.model}`
+    resolvedModel && options.some((o) => o.providerId === assignment.providerId && o.model === resolvedModel)
+      ? `${assignment.providerId}::${resolvedModel}`
       : (options[0]?.value ?? "");
 
   const selectClass =
-    "w-full rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink transition focus:border-vermilion focus:bg-card focus:outline-none";
+    "w-full rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink transition focus:border-vermilion focus:bg-card focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-line bg-card p-4 shadow-2xs">
@@ -61,7 +68,7 @@ function RoleSelectorCard(props: {
           type="button"
           className="cursor-pointer rounded-lg border border-line bg-paper-dim px-3 py-1 text-xs font-medium text-ink transition hover:bg-line/70 disabled:cursor-not-allowed disabled:opacity-40"
           onClick={props.onTest}
-          disabled={props.testing || !resolved.baseURL || !resolved.apiKey || !resolved.model}
+          disabled={props.testing || !resolved?.baseURL || !resolved?.apiKey || !resolved?.model}
         >
           {props.testing ? "测试中…" : "测试连接"}
         </button>
@@ -71,6 +78,7 @@ function RoleSelectorCard(props: {
         <select
           className={selectClass}
           value={currentKey}
+          disabled={options.length === 0}
           onChange={(e) => {
             const val = e.target.value;
             const sep = val.indexOf("::");
@@ -84,7 +92,7 @@ function RoleSelectorCard(props: {
           }}
         >
           {options.length === 0 ? (
-            <option value="">请先在下方提供商中添加模型…</option>
+            <option value="">选择模型</option>
           ) : (
             options.map((o) => (
               <option key={o.value} value={o.value}>
@@ -224,6 +232,9 @@ export function SettingsDrawer(props: {
   const inputClass =
     "w-full rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink placeholder:text-ink-soft/55 transition focus:border-vermilion focus:bg-card focus:outline-none";
 
+  const activeProtocol = activeProvider.protocol;
+  const isGemini = activeProtocol === "gemini";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4 backdrop-blur-xs sm:p-6 print:hidden"
@@ -257,7 +268,9 @@ export function SettingsDrawer(props: {
               resolved={gmResolved}
               options={options}
               onChange={(gm) => onChange({ ...settings, gm })}
-              onTest={() => props.onTest(gmResolved, "gm")}
+              onTest={() => {
+                if (gmResolved) props.onTest(gmResolved, "gm");
+              }}
               testing={props.testingGm}
             />
             <RoleSelectorCard
@@ -267,7 +280,9 @@ export function SettingsDrawer(props: {
               resolved={playerResolved}
               options={options}
               onChange={(player) => onChange({ ...settings, player })}
-              onTest={() => props.onTest(playerResolved, "player")}
+              onTest={() => {
+                if (playerResolved) props.onTest(playerResolved, "player");
+              }}
               testing={props.testingPlayer}
             />
           </div>
@@ -322,7 +337,7 @@ export function SettingsDrawer(props: {
                     <label className="mb-1 block text-xs font-medium text-ink-soft">提供商名称</label>
                     <input
                       className={`${inputClass} font-medium`}
-                      placeholder="如 DeepSeek / Gemini 中转 / OpenRouter"
+                      placeholder="如 OpenAI / Gemini / OpenRouter"
                       value={activeProvider.name}
                       onChange={(e) => updateProvider({ name: e.target.value })}
                     />
@@ -339,12 +354,29 @@ export function SettingsDrawer(props: {
                   )}
                 </div>
 
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-ink-soft">调用协议</label>
+                  <select
+                    className={inputClass}
+                    value={activeProtocol}
+                    onChange={(e) => updateProvider({ protocol: e.target.value as LLMProtocol })}
+                  >
+                    {PROTOCOL_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-ink-soft">API 端点 (baseURL)</label>
                     <input
                       className={inputClass}
-                      placeholder="https://api.deepseek.com/v1"
+                      placeholder={
+                        isGemini ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1"
+                      }
                       value={activeProvider.baseURL}
                       onChange={(e) => updateProvider({ baseURL: e.target.value })}
                     />
@@ -355,7 +387,7 @@ export function SettingsDrawer(props: {
                     <input
                       className={inputClass}
                       type="password"
-                      placeholder="sk-..."
+                      placeholder={isGemini ? "AIza..." : "sk-..."}
                       value={activeProvider.apiKey}
                       onChange={(e) => updateProvider({ apiKey: e.target.value })}
                     />
@@ -363,15 +395,6 @@ export function SettingsDrawer(props: {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-0.5">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-soft hover:text-ink select-none">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 accent-vermilion"
-                      checked={Boolean(activeProvider.useResponsesApi)}
-                      onChange={(e) => updateProvider({ useResponsesApi: e.target.checked || undefined })}
-                    />
-                    <span>使用 Responses API</span>
-                  </label>
                   <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-soft hover:text-ink select-none">
                     <input
                       type="checkbox"
@@ -386,9 +409,7 @@ export function SettingsDrawer(props: {
                 {/* 该提供商下的模型列表 */}
                 <div className="border-t border-line/80 pt-3.5">
                   <div className="mb-2.5 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-ink">
-                      模型列表（可保存多个模型供上方下拉框或快捷按钮切换）
-                    </span>
+                    <span className="text-xs font-semibold text-ink">模型列表</span>
                     <button
                       type="button"
                       onClick={addModelRow}
@@ -403,18 +424,18 @@ export function SettingsDrawer(props: {
                       const trimmed = m.trim();
                       const isGm =
                         settings.gm.providerId === activeProvider.id &&
-                        gmResolved.model === trimmed &&
+                        gmResolved?.model === trimmed &&
                         Boolean(trimmed);
                       const isPlayer =
                         settings.player.providerId === activeProvider.id &&
-                        playerResolved.model === trimmed &&
+                        playerResolved?.model === trimmed &&
                         Boolean(trimmed);
 
                       return (
                         <div key={idx} className="flex items-center gap-2">
                           <input
                             className={inputClass}
-                            placeholder="模型 ID，如 deepseek-chat / gemini-3-pro-preview"
+                            placeholder={isGemini ? "模型 ID，如 gemini-3-pro-preview" : "模型 ID，如 gpt-4o"}
                             value={m}
                             onChange={(e) => updateModelAt(idx, e.target.value)}
                           />

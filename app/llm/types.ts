@@ -1,27 +1,36 @@
+/** 调用协议：OpenAI 两代接口 + Gemini 官方 SDK */
+export type LLMProtocol = "openai-chat" | "openai-responses" | "gemini";
+
 export interface LLMConfig {
-  /** 用户自己的中转/官方端点，如 https://api.deepseek.com/v1 */
+  /** 用户自己的中转/官方端点，需包含 API 版本，如 https://api.openai.com/v1 */
   baseURL: string;
   apiKey: string;
   model: string;
   temperature?: number;
   maxTokens?: number;
   reasoningEffort?: "none" | "low" | "medium" | "high";
-  /** 使用 OpenAI Responses API（/responses），缺省走 Chat Completions（/chat/completions） */
-  useResponsesApi?: boolean;
+  /** 调用协议 */
+  protocol: LLMProtocol;
   /** 通过服务端 /api/proxy 转发请求，规避浏览器 CORS 限制 */
   useProxy?: boolean;
 }
 
 export type ChatMessage =
   | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string | null; toolCalls?: ToolCall[] }
+  | {
+      role: "assistant";
+      content: string | null;
+      toolCalls?: ToolCall[];
+      /** Gemini 正文部分的思维链签名（与工具调用的签名分开保存） */
+      thoughtSignature?: string;
+    }
   | { role: "tool"; toolCallId: string; content: string };
 
 export interface ToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
-  /** Gemini 思维链签名（OpenAI 兼容层在 tool_calls[].extra_content.google.thought_signature 下发，后续轮次必须原样回传） */
+  /** Gemini 思维链签名（原生 SDK 在 functionCall part 上，OpenAI 兼容层在 extra_content.google 上；后续轮次必须原样回传） */
   thoughtSignature?: string;
 }
 

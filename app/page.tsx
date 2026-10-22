@@ -64,7 +64,7 @@ export default function Home() {
     setSettings(loaded);
     const gm = resolveRoleConfig(loaded, "gm");
     // 「展示隐藏状态」不持久化：每次进页面默认关闭，防止意外剧透
-    if (!gm.baseURL) setDrawerOpen(true);
+    if (!gm?.baseURL) setDrawerOpen(true);
   }, []);
 
   const test = async (c: LLMConfig, setTesting: (b: boolean) => void) => {
@@ -115,12 +115,14 @@ export default function Home() {
   };
 
   const canStart =
-    !!gmConfig.baseURL &&
-    !!gmConfig.apiKey &&
-    !!gmConfig.model &&
-    (mode === "play" || (!!playerConfig.baseURL && !!playerConfig.apiKey && !!playerConfig.model));
+    !!gmConfig?.baseURL &&
+    !!gmConfig?.apiKey &&
+    !!gmConfig?.model &&
+    (mode === "play" ||
+      (!!playerConfig?.baseURL && !!playerConfig?.apiKey && !!playerConfig?.model));
 
   const startGame = async () => {
+    if (!gmConfig) return;
     setBusy(true);
     setEntries([]);
     setGameOver(false);
@@ -132,7 +134,10 @@ export default function Home() {
     const engine = new GameEngine(gmConfig);
     engineRef.current = engine;
     // 观战模式：玩家侧也是一个 agent，由页面持有，作为 onScene 的输入来源
-    const player = mode === "spectate" ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player") : null;
+    const player =
+      mode === "spectate" && playerConfig
+        ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player")
+        : null;
     const setup: GameSetup = { genre, protagonist, difficulty };
     try {
       await engine.play(setup, {
@@ -240,7 +245,7 @@ export default function Home() {
         onShowHidden={setShowHidden}
         drawerOpen={drawerOpen}
         onToggleDrawer={() => setDrawerOpen((v) => !v)}
-        gmModelName={gmConfig.model}
+        gmModelName={gmConfig?.model}
       />
 
       {drawerOpen && (

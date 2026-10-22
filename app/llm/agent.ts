@@ -55,6 +55,7 @@ export class Agent {
 
     for (let round = 0; round < (opts?.maxRounds ?? MAX_TOOL_ROUNDS); round++) {
       let roundText = "";
+      let thoughtSignature: string | undefined;
       let toolCalls: ToolCall[] = [];
       for await (const ev of streamTurn(this.config, this.history, {
         signal: opts?.signal,
@@ -65,6 +66,8 @@ export class Agent {
           onChunk(ev.delta);
         } else if (ev.type === "reasoning") {
           onReasoning(ev.delta);
+        } else if (ev.type === "signature") {
+          thoughtSignature = ev.signature;
         } else {
           toolCalls = ev.toolCalls;
         }
@@ -74,6 +77,7 @@ export class Agent {
         role: "assistant",
         content: roundText || null,
         ...(toolCalls.length ? { toolCalls } : {}),
+        ...(thoughtSignature ? { thoughtSignature } : {}),
       });
       if (toolCalls.length === 0) return { text: fullText, called };
 
@@ -111,15 +115,22 @@ export class Agent {
   ): Promise<string> {
     this.history.push({ role: "user", content: userInput });
     let text = "";
+    let thoughtSignature: string | undefined;
     for await (const ev of streamTurn(this.config, this.history, { signal: opts?.signal })) {
       if (ev.type === "text") {
         text += ev.delta;
         opts?.onText?.(ev.delta);
       } else if (ev.type === "reasoning") {
         opts?.onReasoning?.(ev.delta);
+      } else if (ev.type === "signature") {
+        thoughtSignature = ev.signature;
       }
     }
-    this.history.push({ role: "assistant", content: text });
+    this.history.push({
+      role: "assistant",
+      content: text,
+      ...(thoughtSignature ? { thoughtSignature } : {}),
+    });
     return text;
   }
 
