@@ -17,7 +17,7 @@ export function InputBar(props: { options: string[]; onSubmit: (action: string) 
             <button
               key={i}
               type="button"
-              className="group flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-paper/60 px-2.5 py-1.5 text-left text-xs leading-snug text-ink transition hover:border-vermilion/60 hover:bg-vermilion/[0.04] sm:text-sm"
+              className="group flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-paper/60 px-2.5 py-1.5 text-left text-xs leading-snug text-ink transition hover:border-vermilion/60 hover:bg-vermilion/4 sm:text-sm"
               onClick={() => props.onSubmit(o)}
             >
               <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-line bg-card font-mono text-[11px] font-medium text-ink-soft group-hover:border-vermilion/50 group-hover:text-vermilion">

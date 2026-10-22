@@ -95,7 +95,7 @@ export function StoryLog(props: {
           return (
             <div key={i}>
               {props.showHidden && e.debug && e.debug.events.length > 0 && <DebugNote info={e.debug} />}
-              <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/[0.04] px-3 py-1.5 text-sm">
+              <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
                 <span className="font-serif whitespace-pre-wrap text-vermilion">{e.text}</span>
               </div>
             </div>
@@ -156,7 +156,7 @@ export function StoryLog(props: {
               }}
             />
           )}
-          <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/[0.04] px-3 py-1.5 text-sm">
+          <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
             <span className="font-serif whitespace-pre-wrap text-vermilion">
               {props.playerLive.text}
               <span className="animate-caret ml-0.5 text-vermilion">▌</span>
