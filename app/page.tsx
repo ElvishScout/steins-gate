@@ -18,6 +18,7 @@ import { SettingsDrawer } from "./components/SettingsDrawer";
 import { SetupPanel } from "./components/SetupPanel";
 import { BottomDock } from "./components/BottomDock";
 import { StoryLog, type LiveGM, type LivePlayer } from "./components/StoryLog";
+import { copyHistoryMarkdown, downloadHistoryMarkdown } from "./components/exportHistory";
 import type { Entry, Mode } from "./components/entries";
 
 /** 观战模式：把场景格式化成发给玩家 agent 的纯文本（不含任何状态；选项不带编号——玩家只输出行动文本）。 */
@@ -220,15 +221,6 @@ export default function Home() {
   };
 
   const lastScene = [...entries].reverse().find((e) => e.kind === "scene");
-  const status = busy
-    ? mode === "play" && waitingInput
-      ? `第 ${lastScene?.act ?? "—"} 幕 · 等待你的行动`
-      : "收束中…"
-    : gameOver
-      ? "已终局"
-      : stopped || entries.length > 0
-        ? "已停止"
-        : "";
   const showCover = entries.length === 0 && !live && !busy && !stopped && !gameOver;
 
   return (
@@ -236,16 +228,43 @@ export default function Home() {
       <TopBar
         difficulty={difficulty}
         onDifficulty={setDifficulty}
-        status={status}
         busy={busy}
         onStop={() => engineRef.current?.stop()}
         hasEntries={entries.length > 0 || stopped || gameOver}
         onRestart={restart}
+        canSave={entries.length > 0}
+        onSave={({ includeReasoning, includeTools }) =>
+          downloadHistoryMarkdown({
+            entries,
+            includeReasoning,
+            includeTools,
+            mode,
+            difficulty,
+            genre,
+            protagonist,
+            playerStyle,
+            gmModel: gmConfig?.model,
+            playerModel: playerConfig?.model,
+          })
+        }
+        onCopy={({ includeReasoning, includeTools }) =>
+          copyHistoryMarkdown({
+            entries,
+            includeReasoning,
+            includeTools,
+            mode,
+            difficulty,
+            genre,
+            protagonist,
+            playerStyle,
+            gmModel: gmConfig?.model,
+            playerModel: playerConfig?.model,
+          })
+        }
         showHidden={showHidden}
         onShowHidden={setShowHidden}
         drawerOpen={drawerOpen}
         onToggleDrawer={() => setDrawerOpen((v) => !v)}
-        gmModelName={gmConfig?.model}
       />
 
       {drawerOpen && (
