@@ -44,9 +44,21 @@ export class GameEngine {
     const signal = this.aborter.signal;
     this.internals = freshInternals(setup.difficulty);
 
-    // 累积当前场景的正文：present_options 挂起时切一片给 onScene，然后清零重新攒
+    // 累积当前场景的正文：present_options 挂起时切一片给 onScene，然后清零重新攒。
+    // 在本幕必调工具（开局/跃迁后的 define_checkpoints、常规幕的 settle）执行完毕前，
+    // 模型抢跑吐出的正文（如 grok 4.7 习惯先吐一段话再调工具）转为思考过程展示，不计入 sceneText
+    // 也不发给玩家；但 Agent 内部仍按 assistant content 记入历史并在后续轮次原样送回。
     let sceneText = "";
+    let needSettle = false;
+    const readyToNarrate = () =>
+      (!needSettle || this.internals.settledThisAct) &&
+      (this.internals.actsThisLine > 0 ||
+        this.internals.state.checkpoints.some((c) => c.status === "pending"));
     const onChunk = (d: string) => {
+      if (!readyToNarrate()) {
+        hooks.onDebug?.({ type: "reasoning", text: d });
+        return;
+      }
       sceneText += d;
       hooks.onChunk(d);
     };
@@ -69,6 +81,7 @@ export class GameEngine {
         hooks.onScene(scene).then(
           (action) => {
             this.cancelInput = null;
+            needSettle = true;
             resolve(action);
           },
           (e) => {
