@@ -52,7 +52,7 @@ const STRIP_RES_HEADERS = [
 ].map(globToRe);
 
 async function handleProxy(req: NextRequest): Promise<Response> {
-  const rawTarget = req.headers.get("x-target-url") ?? req.nextUrl.searchParams.get("url");
+  const rawTarget = req.headers.get("x-target-url")?.trim();
   if (!rawTarget) {
     return Response.json({ error: { message: "代理请求缺少目标地址（x-target-url）" } }, { status: 400 });
   }
