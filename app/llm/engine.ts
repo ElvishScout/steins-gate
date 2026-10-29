@@ -32,26 +32,112 @@ export class GameEngine {
   private internals: GmInternals = freshInternals("standard");
   private aborter: AbortController | null = null;
   private cancelInput: ((e: Error) => void) | null = null;
+  private stopInputWait: (() => void) | null = null;
+  /** 当前幕正在累积的正文与结算需求标记（跨 retry 保存） */
+  private sceneText = "";
+  private needSettle = false;
+  /** 最近一次稳定边界的快照，供请求失败/手动中断后重试恢复 */
+  private checkpoint: {
+    internals: GmInternals;
+    history: import("./types").ChatMessage[];
+    needSettle: boolean;
+    /** 若非空，说明快照停在 present_options 挂起等待玩家行动处（重试时需先注入玩家行动再推进 GM） */
+    pendingToolCallId?: string;
+    pendingOptions?: string[];
+  } | null = null;
 
   constructor(private gmConfig: LLMConfig) {}
+
+  updateConfig(config: LLMConfig): void {
+    this.gmConfig = config;
+    if (this.gm) this.gm.config = config;
+  }
 
   get state(): GmState {
     return this.internals.state;
   }
 
-  async play(setup: GameSetup, hooks: EngineHooks): Promise<void> {
+  get signal(): AbortSignal | undefined {
+    return this.aborter?.signal;
+  }
+
+  /** 创建新的请求中止控制器，供重试阶段（含观战玩家补跑）使用 */
+  resetAbortController(): AbortSignal {
     this.aborter = new AbortController();
-    const signal = this.aborter.signal;
+    return this.aborter.signal;
+  }
+
+  /** 是否存在等待玩家输入的挂起检查点（自己玩模式下等待玩家行动时被停止） */
+  get hasPendingInput(): boolean {
+    return Boolean(this.checkpoint?.pendingToolCallId);
+  }
+
+  /** 是否存在可重试的未完成回合 */
+  get canRetry(): boolean {
+    return this.gm !== null && this.checkpoint !== null && !this.internals.ending;
+  }
+
+  private saveCheckpoint(pending?: { toolCallId: string; options: string[] }): void {
+    if (!this.gm) return;
+    this.checkpoint = {
+      internals: structuredClone(this.internals),
+      history: structuredClone(this.gm.history),
+      needSettle: this.needSettle,
+      ...(pending ? { pendingToolCallId: pending.toolCallId, pendingOptions: pending.options } : {}),
+    };
+  }
+
+  /** 当快照停在等待玩家行动处、且外部补齐了玩家行动时，将行动写入快照使之推进到 GM 下一幕起点 */
+  completePendingAction(action: string): void {
+    if (!this.checkpoint?.pendingToolCallId) return;
+    this.checkpoint.internals.options = this.checkpoint.pendingOptions ?? [];
+    this.checkpoint.internals.settledThisAct = false;
+    const result = `${snapshot(this.checkpoint.internals)}\n[玩家行动] ${action}`;
+    this.checkpoint.history.push({
+      role: "tool",
+      toolCallId: this.checkpoint.pendingToolCallId,
+      content: result,
+    });
+    this.checkpoint.needSettle = true;
+    delete this.checkpoint.pendingToolCallId;
+    delete this.checkpoint.pendingOptions;
+  }
+
+  async play(setup: GameSetup, hooks: EngineHooks): Promise<void> {
     this.internals = freshInternals(setup.difficulty);
+    this.sceneText = "";
+    this.needSettle = false;
+    this.gm = new Agent(this.gmConfig, buildGmPrompt(setup), "gm");
+    const kickoff = buildKickoffPrompt(setup, snapshot(this.internals));
+    this.gm.history.push({ role: "user", content: kickoff });
+    this.saveCheckpoint();
+    await this.runLoop(hooks);
+  }
+
+  /** 从最近一次稳定边界恢复状态并重新发起 GM 回合 */
+  async retry(hooks: EngineHooks): Promise<void> {
+    if (!this.gm || !this.checkpoint) return;
+    this.aborter = new AbortController();
+    this.internals = structuredClone(this.checkpoint.internals);
+    this.gm.history = structuredClone(this.checkpoint.history);
+    this.needSettle = this.checkpoint.needSettle;
+    this.sceneText = "";
+    await this.runLoop(hooks);
+  }
+
+  private async runLoop(hooks: EngineHooks): Promise<void> {
+    if (!this.gm) return;
+    if (!this.aborter || this.aborter.signal.aborted) {
+      this.aborter = new AbortController();
+    }
+    const signal = this.aborter.signal;
 
     // 累积当前场景的正文：present_options 挂起时切一片给 onScene，然后清零重新攒。
     // 在本幕必调工具（开局/跃迁后的 define_checkpoints、常规幕的 settle）执行完毕前，
     // 模型抢跑吐出的正文（如 grok 4.7 习惯先吐一段话再调工具）转为思考过程展示，不计入 sceneText
     // 也不发给玩家；但 Agent 内部仍按 assistant content 记入历史并在后续轮次原样送回。
-    let sceneText = "";
-    let needSettle = false;
     const readyToNarrate = () =>
-      (!needSettle || this.internals.settledThisAct) &&
+      (!this.needSettle || this.internals.settledThisAct) &&
       (this.internals.actsThisLine > 0 ||
         this.internals.state.checkpoints.some((c) => c.status === "pending"));
     const onChunk = (d: string) => {
@@ -59,41 +145,58 @@ export class GameEngine {
         hooks.onDebug?.({ type: "reasoning", text: d });
         return;
       }
-      sceneText += d;
+      this.sceneText += d;
       hooks.onChunk(d);
     };
 
-    const tools = createGmTools(this.internals, (options) => {      // 工具物理：没有正文的场景不许递交（工具先行的模型会把正文推到下一幕，全程错位）
-      if (!sceneText.trim()) {
-        throw new Error(
-          "本幕还没有叙事正文：先输出正文（会流式展示给玩家），再递交选项。玩家只能通过正文了解故事。",
-        );
-      }
-      return new Promise<string>((resolve, reject) => {
-        this.cancelInput = reject;
-        const scene: Scene = {
-          act: this.internals.state.act,
-          narration: sceneText.trim(),
-          options,
-          state: { ...this.internals.state },
-        };
-        sceneText = "";
-        hooks.onScene(scene).then(
-          (action) => {
-            this.cancelInput = null;
-            needSettle = true;
-            resolve(action);
-          },
-          (e) => {
-            this.cancelInput = null;
-            reject(e);
-          },
-        );
-      });
-    }, hooks.onDebug);
-    this.gm = new Agent(this.gmConfig, buildGmPrompt(setup), "gm");
+    const tools = createGmTools(
+      this.internals,
+      (options) => {
+        // 工具物理：没有正文的场景不许递交（工具先行的模型会把正文推到下一幕，全程错位）
+        if (!this.sceneText.trim()) {
+          throw new Error(
+            "本幕还没有叙事正文：先输出正文（会流式展示给玩家），再递交选项。玩家只能通过正文了解故事。",
+          );
+        }
+        return new Promise<string>((resolve, reject) => {
+          this.cancelInput = reject;
+          const scene: Scene = {
+            act: this.internals.state.act,
+            narration: this.sceneText.trim(),
+            options,
+            state: { ...this.internals.state },
+          };
+          this.sceneText = "";
+          const optsList = options.map(String);
+          // 场景正文与选项已校验通过并即将展示给用户：先保存场景边界快照，
+          // 若在等待玩家（或观战玩家 agent）行动期间被停止，重试时可保留本幕而不必重跑本幕 GM
+          const lastMsg = this.gm?.history[this.gm.history.length - 1];
+          const tcId =
+            lastMsg?.role === "assistant"
+              ? lastMsg.toolCalls?.find((tc) => tc.name === "present_options")?.id
+              : undefined;
+          if (tcId) {
+            this.saveCheckpoint({ toolCallId: tcId, options: optsList });
+          }
+          hooks.onScene(scene).then(
+            (action) => {
+              this.cancelInput = null;
+              this.needSettle = true;
+              resolve(action);
+            },
+            (e) => {
+              this.cancelInput = null;
+              const err = e instanceof Error ? e : new Error(String(e));
+              (err as { fatal?: boolean }).fatal = true;
+              reject(err);
+            },
+          );
+        });
+      },
+      hooks.onDebug,
+    );
 
-    let input = buildKickoffPrompt(setup, snapshot(this.internals));
+    let input: string | null = null;
     try {
       for (let stalls = 0; !this.internals.ending; ) {
         this.internals.options = null;
@@ -104,6 +207,11 @@ export class GameEngine {
           signal,
           maxRounds: GM_MAX_ROUNDS,
           terminal: ["declare_ending"],
+          onToolResult: (name) => {
+            if (name === "present_options" && this.internals.options !== null) {
+              this.saveCheckpoint();
+            }
+          },
         });
         if (this.internals.ending) break;
         if (this.internals.options !== null) {
@@ -111,7 +219,7 @@ export class GameEngine {
         } else if (++stalls > MAX_STALLS) {
           throw new Error("GM 连续多次未递交选项就中断了回合，无法继续对局");
         }
-        input = sceneText.trim()
+        input = this.sceneText.trim()
           ? // 正文已流出但未交选项：提示的重点是"该交选项了"，不禁止写完（可能正被打断在半段）
             `${snapshot(this.internals)}\n[引擎] 回合未完成：本幕正文已输出，请立即调用 present_options 将选择权交给玩家（若故事已至终局则调用 declare_ending）。`
           : this.internals.state.checkpoints.length === 0
@@ -123,11 +231,19 @@ export class GameEngine {
       throw e;
     }
     const ending = this.internals.ending;
-    if (ending) hooks.onEnding(ending, { ...this.internals.state });
+    if (ending) {
+      this.checkpoint = null;
+      hooks.onEnding(ending, { ...this.internals.state });
+    }
   }
 
   stop(): void {
+    this.stopInputWait?.();
     this.cancelInput?.(new Error("已停止"));
     this.aborter?.abort();
+  }
+
+  onStopInputWait(fn: (() => void) | null): void {
+    this.stopInputWait = fn;
   }
 }

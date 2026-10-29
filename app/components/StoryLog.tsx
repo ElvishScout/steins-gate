@@ -28,7 +28,9 @@ export function StoryLog(props: {
   entries: Entry[];
   live: LiveGM | null;
   playerLive: LivePlayer | null;
+  busy: boolean;
   showHidden: boolean;
+  onRetry?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   /** 上一 commit 的文档高度：内容追加前的整页高度 */
@@ -53,7 +55,7 @@ export function StoryLog(props: {
     stickRef.current = wasAtBottom;
     if (wasAtBottom) scrollToPageBottom();
     prevHeightRef.current = doc.scrollHeight;
-  }, [props.entries, props.live, props.playerLive]);
+  }, [props.entries, props.live, props.playerLive, props.onRetry]);
 
   // 页面内容尺寸变化（底栏展开/收起、详情折叠、窗口缩放）：跟随上次已知贴底状态
   useEffect(() => {
@@ -136,11 +138,11 @@ export function StoryLog(props: {
       {props.live && (
         <article className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs">
           {props.showHidden && props.live.events.length > 0 && (
-            <DebugNote live info={{ events: props.live.events, state: null }} />
+            <DebugNote live={props.busy} info={{ events: props.live.events, state: null }} />
           )}
           <div className="font-serif text-[15.5px] leading-[1.75] whitespace-pre-wrap text-ink">
             {props.live.narration}
-            <span className="animate-caret ml-0.5 text-vermilion">▌</span>
+            {props.busy && <span className="animate-caret ml-0.5 text-vermilion">▌</span>}
           </div>
         </article>
       )}
@@ -149,7 +151,7 @@ export function StoryLog(props: {
         <div>
           {props.showHidden && props.playerLive.reasoning && (
             <DebugNote
-              live
+              live={props.busy}
               info={{
                 events: [{ type: "reasoning", text: props.playerLive.reasoning }],
                 state: null,
@@ -159,9 +161,22 @@ export function StoryLog(props: {
           <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
             <span className="font-serif whitespace-pre-wrap text-vermilion">
               {props.playerLive.text}
-              <span className="animate-caret ml-0.5 text-vermilion">▌</span>
+              {props.busy && <span className="animate-caret ml-0.5 text-vermilion">▌</span>}
             </span>
           </div>
+        </div>
+      )}
+
+      {!props.busy && props.onRetry && (
+        <div className="flex justify-start print:hidden">
+          <button
+            type="button"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-vermilion/35 bg-card px-3 py-1.5 text-xs font-medium text-vermilion shadow-2xs transition hover:border-vermilion hover:bg-vermilion/5 sm:text-sm"
+            onClick={props.onRetry}
+          >
+            <span>↻</span>
+            <span>重试</span>
+          </button>
         </div>
       )}
     </div>

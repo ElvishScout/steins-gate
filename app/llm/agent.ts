@@ -21,22 +21,25 @@ export class Agent {
   history: ChatMessage[] = [];
 
   constructor(
-    readonly config: LLMConfig,
+    config: LLMConfig,
     systemPrompt: string,
     name = "agent",
   ) {
+    this.config = config;
     this.name = name;
     this.history.push({ role: "system", content: systemPrompt });
   }
+  config: LLMConfig;
 
   /**
    * 推进一个回合：流式产出正文（onChunk 实时回调），若模型发出 tool_calls，
    * 执行并回填结果后继续，直到模型不再调用工具为止。
    * 所有轮次的文本都会流出并拼进返回值：模型可能先调工具再写正文
    * （比如开局先 define_checkpoints），只取第一轮会吞掉正文。
+   * 若 userInput 为 null，则不追加新的 user 消息，直接基于当前历史继续（用于失败/中断后重试）。
    */
   async runTurn(
-    userInput: string,
+    userInput: string | null,
     opts?: {
       tools?: AgentTool[];
       onChunk?: (delta: string) => void;
@@ -47,9 +50,13 @@ export class Agent {
       maxRounds?: number;
       /** 终止性工具：执行成功后立即结束循环（如 declare_ending）；执行报错不算 */
       terminal?: string[];
+      /** 每个工具执行结果回填进 history 后触发 */
+      onToolResult?: (name: string) => void;
     },
   ): Promise<{ text: string; called: string[] }> {
-    this.history.push({ role: "user", content: userInput });
+    if (userInput !== null) {
+      this.history.push({ role: "user", content: userInput });
+    }
     const onChunk = opts?.onChunk ?? noop;
     const onReasoning = opts?.onReasoning ?? noop;
     const called: string[] = [];
@@ -85,7 +92,8 @@ export class Agent {
       if (toolCalls.length === 0) return { text: fullText, called };
 
       let hitTerminal = false;
-      for (const tc of toolCalls) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i];
         called.push(tc.name);
         const tool = opts?.tools?.find((t) => t.name === tc.name);
         let result: string;
@@ -97,10 +105,15 @@ export class Agent {
             result = typeof raw === "string" ? raw : JSON.stringify(raw);
             hitTerminal ||= opts?.terminal?.includes(tc.name) ?? false;
           } catch (e) {
+            if (opts?.signal?.aborted || (e instanceof Error && (e as { fatal?: boolean }).fatal)) {
+              // 挂起工具（如 present_options）因外部中止或玩家请求失败退出，将异常原样抛给外层处理
+              throw e;
+            }
             result = `错误：${e instanceof Error ? e.message : String(e)}`;
           }
         }
         this.history.push({ role: "tool", toolCallId: tc.id, content: result });
+        opts?.onToolResult?.(tc.name);
       }
       if (hitTerminal) return { text: fullText, called };
     }
@@ -109,14 +122,16 @@ export class Agent {
 
   /** 一步对话（玩家 agent、连接测试用）。底层走流式，正文/思维链可经回调实时取出。 */
   async step(
-    userInput: string,
+    userInput: string | null,
     opts?: {
       signal?: AbortSignal;
       onText?: (delta: string) => void;
       onReasoning?: (delta: string) => void;
     },
   ): Promise<string> {
-    this.history.push({ role: "user", content: userInput });
+    if (userInput !== null) {
+      this.history.push({ role: "user", content: userInput });
+    }
     let text = "";
     let thoughtSignature: string | undefined;
     for await (const ev of streamTurn(this.config, this.history, {

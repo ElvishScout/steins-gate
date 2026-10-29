@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Agent } from "./llm/agent";
-import { GameEngine } from "./llm/engine";
+import { GameEngine, type EngineHooks } from "./llm/engine";
 import { chat } from "./llm/llm";
 import { buildPlayerPrompt, type PlayerStyleId } from "./llm/prompts/player";
 import type { Ending, GameSetup, GmDebugEvent, LLMConfig, Scene } from "./llm/types";
@@ -46,10 +46,15 @@ export default function Home() {
   const [gameOver, setGameOver] = useState(false);
   /** 被主动停止（区别于自然终局）：顶栏显示「重新开始」，点了才回初始面板 */
   const [stopped, setStopped] = useState(false);
+  /** 当前是否存在因请求失败或手动中断而可重试的回合 */
+  const [canRetry, setCanRetry] = useState(false);
   const [testingGm, setTestingGm] = useState(false);
   const [testingPlayer, setTestingPlayer] = useState(false);
 
   const engineRef = useRef<GameEngine | null>(null);
+  const playerRef = useRef<Agent | null>(null);
+  /** 观战模式下玩家 agent 待重试的场景（为 null 表示重试目标是 GM 回合） */
+  const pendingPlayerSceneRef = useRef<Scene | null>(null);
   const inputResolverRef = useRef<((action: string) => void) | null>(null);
   /** 流式累加的真源（setLive 只是它的快照）：归档进条目时从这里取 */
   const liveRef = useRef<{ narration: string; events: GmDebugEvent[] }>({
@@ -94,25 +99,45 @@ export default function Home() {
   };
 
   /** 观战模式：玩家 agent 行动（正文与思维链双流式），回复入流并附上思维链 */
-  const runPlayer = async (player: Agent, input: string): Promise<string> => {
+  const runPlayer = async (player: Agent, input: string | null): Promise<string> => {
+    const histLen = player.history.length;
     setPlayerLive({ text: "", reasoning: "" });
+    let text = "";
     let reasoning = "";
-    const action = await player.step(input, {
-      onText: (d) => setPlayerLive((prev) => (prev ? { ...prev, text: prev.text + d } : prev)),
-      onReasoning: (d) => {
-        reasoning += d;
-        setPlayerLive((prev) => (prev ? { ...prev, reasoning: prev.reasoning + d } : prev));
-      },
-    });
-    setPlayerLive(null);
-    pushEntry({
-      kind: "action",
-      text: action,
-      by: "player-agent",
-      // 无思维链则不展示附注（直接没有，不留占位）
-      ...(reasoning ? { debug: { events: [{ type: "reasoning" as const, text: reasoning }], state: null } } : {}),
-    });
-    return action;
+    try {
+      const action = await player.step(input, {
+        signal: engineRef.current?.signal,
+        onText: (d) => {
+          text += d;
+          setPlayerLive((prev) => (prev ? { ...prev, text: prev.text + d } : prev));
+        },
+        onReasoning: (d) => {
+          reasoning += d;
+          setPlayerLive((prev) => (prev ? { ...prev, reasoning: prev.reasoning + d } : prev));
+        },
+      });
+      setPlayerLive(null);
+      pendingPlayerSceneRef.current = null;
+      pushEntry({
+        kind: "action",
+        text: action,
+        by: "player-agent",
+        // 无思维链则不展示附注（直接没有，不留占位）
+        ...(reasoning ? { debug: { events: [{ type: "reasoning" as const, text: reasoning }], state: null } } : {}),
+      });
+      return action;
+    } catch (e) {
+      // 玩家请求失败或中断：回滚刚刚压入的 user 消息，保留已流出的半截内容供查看（若均为空则清掉占位）
+      player.history.length = histLen;
+      if (!text && !reasoning) setPlayerLive(null);
+      throw e;
+    }
+  };
+
+  /** Sync current model settings into existing agents so retry uses updated config */
+  const syncAgentConfigs = () => {
+    if (engineRef.current && gmConfig) engineRef.current.updateConfig(gmConfig);
+    if (playerRef.current && playerConfig) playerRef.current.config = playerConfig;
   };
 
   const canStart =
@@ -122,13 +147,87 @@ export default function Home() {
     (mode === "play" ||
       (!!playerConfig?.baseURL && !!playerConfig?.apiKey && !!playerConfig?.model));
 
+  const makeHooks = (player: Agent | null): EngineHooks => ({
+    onChunk: (d) => {
+      liveRef.current.narration += d;
+      syncLive();
+    },
+    onDebug: (ev) => {
+      const evs = liveRef.current.events;
+      const last = evs[evs.length - 1];
+      // 连续的思维链增量合并成一段（否则每个 token 渲染成一行）；工具事件天然分段
+      if (ev.type === "reasoning" && last?.type === "reasoning") last.text += ev.text;
+      else evs.push(ev);
+      syncLive();
+    },
+    onScene: async (scene) => {
+      pushEntry({
+        kind: "scene",
+        act: scene.act,
+        narration: scene.narration,
+        options: scene.options,
+        debug: { events: drainLive(), state: scene.state },
+      });
+      if (player) {
+        pendingPlayerSceneRef.current = scene;
+        return runPlayer(player, formatScene(scene));
+      }
+      // 人类玩家：挂起直到 act() 投递输入
+      setWaitingInput(true);
+      return new Promise<string>((resolve) => {
+        inputResolverRef.current = resolve;
+      });
+    },
+    onEnding: (e, state) => {
+      setGameOver(true);
+      setCanRetry(false);
+      endingRef.current = e;
+      pushEntry({
+        kind: "ending",
+        title: e.title,
+        yearbook: e.yearbook,
+        debug: { events: drainLive(), state },
+      });
+    },
+  });
+
+  /** 执行或恢复 GM 循环，统一处理主动中断与请求异常的收尾 */
+  const runEngineTask = async (task: () => Promise<void>) => {
+    try {
+      await task();
+      // play()/retry() 静默返回 = 被主动停止（自然终局走 onEnding，异常走 catch）
+      const ended = endingRef.current as Ending | null;
+      if (!ended) {
+        if (!liveRef.current.narration && liveRef.current.events.length === 0) {
+          setLive(null);
+        }
+        setStopped(true);
+        setCanRetry(Boolean(engineRef.current?.canRetry || pendingPlayerSceneRef.current));
+      }
+    } catch (e) {
+      if (!liveRef.current.narration && liveRef.current.events.length === 0) {
+        setLive(null);
+      }
+      pushEntry({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+      setStopped(true);
+      setCanRetry(Boolean(engineRef.current?.canRetry || pendingPlayerSceneRef.current));
+    } finally {
+      setBusy(false);
+      setWaitingInput(false);
+      inputResolverRef.current = null;
+    }
+  };
+
   const startGame = async () => {
     if (!gmConfig) return;
     setBusy(true);
     setEntries([]);
     setGameOver(false);
     setStopped(false);
+    setCanRetry(false);
     setDrawerOpen(false); // 开局即收起抽屉，屏幕让给故事
+    endingRef.current = null;
+    pendingPlayerSceneRef.current = null;
     liveRef.current = { narration: "", events: [] };
     setLive(null);
     setPlayerLive(null);
@@ -139,61 +238,73 @@ export default function Home() {
       mode === "spectate" && playerConfig
         ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player")
         : null;
+    playerRef.current = player;
     const setup: GameSetup = { genre, protagonist, difficulty };
-    try {
-      await engine.play(setup, {
-        onChunk: (d) => {
-          liveRef.current.narration += d;
-          syncLive();
-        },
-        onDebug: (ev) => {
-          const evs = liveRef.current.events;
-          const last = evs[evs.length - 1];
-          // 连续的思维链增量合并成一段（否则每个 token 渲染成一行）；工具事件天然分段
-          if (ev.type === "reasoning" && last?.type === "reasoning") last.text += ev.text;
-          else evs.push(ev);
-          syncLive();
-        },
-        onScene: async (scene) => {
-          pushEntry({
-            kind: "scene",
-            act: scene.act,
-            narration: scene.narration,
-            options: scene.options,
-            debug: { events: drainLive(), state: scene.state },
-          });
-          if (player) return runPlayer(player, formatScene(scene));
-          // 人类玩家：挂起直到 act() 投递输入
-          setWaitingInput(true);
-          return new Promise<string>((resolve) => {
-            inputResolverRef.current = resolve;
-          });
-        },
-        onEnding: (e, state) => {
-          setGameOver(true);
-          endingRef.current = e;
-          pushEntry({
-            kind: "ending",
-            title: e.title,
-            yearbook: e.yearbook,
-            debug: { events: drainLive(), state },
-          });
-        },
-      });
-      // play() 静默返回 = 被主动停止（自然终局走 onEnding，异常走 catch）
-      const ended = endingRef.current as Ending | null;
-      if (!ended) setStopped(true);
-    } catch (e) {
-      // 报错时流式残片照旧丢弃
-      setLive(null);
-      setPlayerLive(null);
-      liveRef.current = { narration: "", events: [] };
-      pushEntry({ kind: "error", text: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setBusy(false);
-      setWaitingInput(false);
-      inputResolverRef.current = null;
+    await runEngineTask(() => engine.play(setup, makeHooks(player)));
+  };
+
+  /** 失败或手动中断后重试当前未完成的 LLM 请求 */
+  const retry = async () => {
+    const engine = engineRef.current;
+    if (!engine || busy || gameOver) return;
+    syncAgentConfigs();
+    // 移除末尾的报错框，清理上一次半截流式残片
+    setEntries((prev) => {
+      const next = [...prev];
+      while (next.length > 0 && next[next.length - 1].kind === "error") {
+        next.pop();
+      }
+      return next;
+    });
+    setStopped(false);
+    setCanRetry(false);
+    setBusy(true);
+    engine.resetAbortController();
+
+    const player = playerRef.current;
+    const pendingScene = pendingPlayerSceneRef.current;
+    // 若中断或失败发生在观战模式的玩家 agent 回合，先重跑玩家回合拿到行动，再写入引擎检查点继续 GM
+    if (player && pendingScene) {
+      let action: string;
+      try {
+        action = await runPlayer(player, formatScene(pendingScene));
+      } catch (e) {
+        if (!engine.signal?.aborted) {
+          pushEntry({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+        }
+        setStopped(true);
+        setCanRetry(true);
+        setBusy(false);
+        return;
+      }
+      engine.completePendingAction(action);
     }
+
+    // 若人类玩家在等待输入期间点击了停止，重试即恢复等待输入并可继续行动
+    if (!player && engine.hasPendingInput) {
+      setWaitingInput(true);
+      try {
+        const action = await new Promise<string>((resolve, reject) => {
+          inputResolverRef.current = resolve;
+          engine.onStopInputWait(() => reject(new Error("已停止")));
+        });
+        engine.onStopInputWait(null);
+        engine.completePendingAction(action);
+      } catch {
+        engine.onStopInputWait(null);
+        inputResolverRef.current = null;
+        setStopped(true);
+        setCanRetry(true);
+        setBusy(false);
+        setWaitingInput(false);
+        return;
+      }
+    }
+
+    liveRef.current = { narration: "", events: [] };
+    setLive({ narration: "", events: [] });
+    setPlayerLive(null);
+    await runEngineTask(() => engine.retry(makeHooks(player)));
   };
 
   /** 人类玩家递交行动：解开引擎里挂起的 present_options */
@@ -215,8 +326,10 @@ export default function Home() {
     setLive(null);
     setPlayerLive(null);
     liveRef.current = { narration: "", events: [] };
+    pendingPlayerSceneRef.current = null;
     setGameOver(false);
     setStopped(false);
+    setCanRetry(false);
     setWaitingInput(false);
   };
 
@@ -298,7 +411,14 @@ export default function Home() {
               onOpenSettings={() => setDrawerOpen(true)}
             />
           ) : (
-            <StoryLog entries={entries} live={live} playerLive={playerLive} showHidden={showHidden} />
+            <StoryLog
+              entries={entries}
+              live={live}
+              playerLive={playerLive}
+              busy={busy}
+              showHidden={showHidden}
+              onRetry={canRetry && !gameOver ? retry : undefined}
+            />
           )}
         </div>
 
