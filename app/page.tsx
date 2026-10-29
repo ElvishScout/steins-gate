@@ -218,8 +218,13 @@ export default function Home() {
     }
   };
 
-  const startGame = async () => {
+  const startGame = async (inheritFromPrev = false) => {
     if (!gmConfig) return;
+    const prevEngine = inheritFromPrev ? engineRef.current : null;
+    const nextGenre = prevEngine?.currentSetup.genre?.trim() || genre;
+    const nextProtagonist = prevEngine?.currentSetup.protagonist?.trim() || protagonist;
+    const initialCheckpoints = prevEngine?.initialCheckpoints;
+
     setBusy(true);
     setEntries([]);
     setGameOver(false);
@@ -239,8 +244,8 @@ export default function Home() {
         ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player")
         : null;
     playerRef.current = player;
-    const setup: GameSetup = { genre, protagonist, difficulty };
-    await runEngineTask(() => engine.play(setup, makeHooks(player)));
+    const setup: GameSetup = { genre: nextGenre, protagonist: nextProtagonist, difficulty };
+    await runEngineTask(() => engine.play(setup, makeHooks(player), initialCheckpoints));
   };
 
   /** 失败或手动中断后重试当前未完成的 LLM 请求 */
@@ -353,8 +358,8 @@ export default function Home() {
             includeTools,
             mode,
             difficulty,
-            genre,
-            protagonist,
+            genre: engineRef.current?.currentSetup.genre || genre,
+            protagonist: engineRef.current?.currentSetup.protagonist || protagonist,
             playerStyle,
             gmModel: gmConfig?.model,
             playerModel: playerConfig?.model,
@@ -367,8 +372,8 @@ export default function Home() {
             includeTools,
             mode,
             difficulty,
-            genre,
-            protagonist,
+            genre: engineRef.current?.currentSetup.genre || genre,
+            protagonist: engineRef.current?.currentSetup.protagonist || protagonist,
             playerStyle,
             gmModel: gmConfig?.model,
             playerModel: playerConfig?.model,
@@ -407,7 +412,7 @@ export default function Home() {
               playerStyle={playerStyle}
               onPlayerStyle={setPlayerStyle}
               canStart={canStart}
-              onStart={startGame}
+              onStart={() => startGame(false)}
               onOpenSettings={() => setDrawerOpen(true)}
             />
           ) : (
@@ -430,7 +435,7 @@ export default function Home() {
           playerThinking={playerLive !== null}
           options={lastScene?.options ?? []}
           onSubmit={act}
-          onRestart={startGame}
+          onRestart={() => startGame(true)}
         />
       </main>
     </div>

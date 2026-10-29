@@ -1,5 +1,5 @@
 import type { AgentTool } from "./agent";
-import { barrierOf, GM_SKILLS, profileOf, rollInspiration, type GmSkillId } from "./prompts/gm";
+import { barrierOf, GM_SKILLS, profileOf, type GmSkillId } from "./prompts/gm";
 import type { Checkpoint, Contradiction, ContradictionMagnitude, Difficulty, GmDebugEvent, GmState } from "./types";
 
 /** 矛盾量级档位 → 合法幅度区间（百分点，取绝对值）。restorative 为负方向。 */
@@ -70,6 +70,8 @@ export interface GmInternals {
   settledThisAct: boolean;
   /** 本幕是否刚调用过 define_checkpoints（防止建好新检查点当幕就触发掉；present_options 成功时复位） */
   definedCheckpointsThisAct: boolean;
+  /** 开局首个收束范围（α 线）的初始检查点备份，供「再开一周目」直接复用 */
+  initialCheckpoints: Checkpoint[];
   /** 当前收束范围已进行的幕数（节奏判定用；跃迁时清零，state.act 是全剧累计不清零） */
   actsThisLine: number;
   /** present_options 捕获的本幕选项 */
@@ -78,10 +80,17 @@ export interface GmInternals {
   ending: { tier: string; title: string; yearbook: string } | null;
 }
 
-export function freshInternals(difficulty: Difficulty = "standard"): GmInternals {
+export function freshInternals(
+  difficulty: Difficulty = "standard",
+  initialCheckpoints?: Checkpoint[],
+): GmInternals {
   const profile = profileOf(difficulty);
   const [minDiv, maxDiv] = profile.initialRange;
   const initialDiv = round6(minDiv + Math.random() * (maxDiv - minDiv));
+  const presetCps: Checkpoint[] = (initialCheckpoints ?? []).map(({ note: _, ...c }) => ({
+    ...structuredClone(c),
+    status: "pending" as const,
+  }));
   return {
     state: {
       act: 0,
@@ -89,7 +98,7 @@ export function freshInternals(difficulty: Difficulty = "standard"): GmInternals
       // 初始读数：按难度落在 α 线不同深浅区间（如标准难度对应 0.571024% 附近，残酷对应 0.337187% 深渊）
       divergence: initialDiv,
       barrier: barrierOf(difficulty),
-      checkpoints: [],
+      checkpoints: presetCps,
       contradictions: [],
       history: [],
       ending: null,
@@ -97,7 +106,8 @@ export function freshInternals(difficulty: Difficulty = "standard"): GmInternals
     fragileRatio: profile.fragileRatio,
     loadedSkills: new Set(),
     settledThisAct: false,
-    definedCheckpointsThisAct: false,
+    definedCheckpointsThisAct: presetCps.length > 0,
+    initialCheckpoints: structuredClone(presetCps),
     actsThisLine: 0,
     options: null,
     ending: null,
@@ -348,6 +358,14 @@ export function createGmTools(
         required: ["checkpoints"],
       },
       run(args) {
+        if (gm.state.act === 0 && gm.initialCheckpoints.length > 0 && gm.state.checkpoints.length > 0) {
+          return {
+            ok: true,
+            count: gm.state.checkpoints.length,
+            message:
+              "本局已继承初始检查点因果链，无需重复定义。请继续思考并写出第 1 幕小说正文，随后调用 present_options 将选择权交给玩家。",
+          };
+        }
         const list = args.checkpoints;
         if (!Array.isArray(list) || list.length < 4 || list.length > 6) {
           throw new Error("检查点必须是 4~6 个，连成一条因果链。");
@@ -375,10 +393,13 @@ export function createGmTools(
             "每个收束范围至多 1 个'全部承重条件均为 cognition'的检查点（宜放在链尾或弱下游，作为通往命运石之门线结局的突破口），请重发。",
           );
         }
-        gm.state.checkpoints = (list as Omit<Checkpoint, "status">[]).map((c) => ({
+        gm.state.checkpoints = structuredClone(list as Omit<Checkpoint, "status">[]).map((c) => ({
           ...c,
           status: "pending" as const,
         }));
+        if (gm.initialCheckpoints.length === 0) {
+          gm.initialCheckpoints = structuredClone(gm.state.checkpoints);
+        }
         gm.definedCheckpointsThisAct = true;
         return {
           ok: true,
@@ -617,18 +638,6 @@ export function createGmTools(
         }
         gm.loadedSkills.add(id);
         return skill.content;
-      },
-    },
-    {
-      name: "roll_inspiration",
-      description:
-        "随机抽取一批题材词与文学意象词作为创作灵感（对玩家不可见）。以设定的『确定性』为判断标准：当玩家未指定题材，或仅给出了开放性的类型/背景方向（具体故事与开场意象尚未锁定）时调用；若玩家设定已具有高确定性（如指定还原某部已知作品、特定历史事件或已锁定具体开场情境），则无需调用。",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-      run() {
-        return rollInspiration();
       },
     },
   ];

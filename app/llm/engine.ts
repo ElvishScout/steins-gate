@@ -1,7 +1,8 @@
 import { Agent } from "./agent";
 import { createGmTools, freshInternals, snapshot, type GmInternals } from "./gm-tools";
 import { buildGmPrompt, buildKickoffPrompt } from "./prompts/gm";
-import type { Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
+import { buildSetupPrompt, buildSetupUserMessage, createSetupTools } from "./prompts/setup";
+import type { Checkpoint, Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
 
 /** GM 整局跑在一条 agent 循环里，轮数上限要给足（每幕约 2~4 轮工具调用）。 */
 const GM_MAX_ROUNDS = 300;
@@ -29,6 +30,7 @@ export interface EngineHooks {
  */
 export class GameEngine {
   private gm: Agent | null = null;
+  private setup: GameSetup = { difficulty: "standard" };
   private internals: GmInternals = freshInternals("standard");
   private aborter: AbortController | null = null;
   private cancelInput: ((e: Error) => void) | null = null;
@@ -55,6 +57,16 @@ export class GameEngine {
 
   get state(): GmState {
     return this.internals.state;
+  }
+
+  /** 当前局的设定（经开局 setup 子代理扩充后的版本） */
+  get currentSetup(): GameSetup {
+    return this.setup;
+  }
+
+  /** 当前局 α 线的初始检查点备份（供「再开一周目」复用） */
+  get initialCheckpoints(): Checkpoint[] {
+    return this.internals.initialCheckpoints;
   }
 
   get signal(): AbortSignal | undefined {
@@ -103,13 +115,18 @@ export class GameEngine {
     delete this.checkpoint.pendingOptions;
   }
 
-  async play(setup: GameSetup, hooks: EngineHooks): Promise<void> {
-    this.internals = freshInternals(setup.difficulty);
+  async play(setup: GameSetup, hooks: EngineHooks, initialCheckpoints?: Checkpoint[]): Promise<void> {
+    this.setup = { ...setup };
+    this.internals = freshInternals(setup.difficulty, initialCheckpoints);
     this.sceneText = "";
     this.needSettle = false;
-    this.gm = new Agent(this.gmConfig, buildGmPrompt(setup), "gm");
-    const kickoff = buildKickoffPrompt(setup, snapshot(this.internals));
-    this.gm.history.push({ role: "user", content: kickoff });
+    this.gm = new Agent(this.gmConfig, buildGmPrompt(this.setup), "gm");
+    if (initialCheckpoints && initialCheckpoints.length > 0) {
+      this.gm.history.push({
+        role: "user",
+        content: buildKickoffPrompt(this.setup, snapshot(this.internals), true),
+      });
+    }
     this.saveCheckpoint();
     await this.runLoop(hooks);
   }
@@ -164,7 +181,7 @@ export class GameEngine {
             act: this.internals.state.act,
             narration: this.sceneText.trim(),
             options,
-            state: { ...this.internals.state },
+            state: structuredClone(this.internals.state),
           };
           this.sceneText = "";
           const optsList = options.map(String);
@@ -198,6 +215,23 @@ export class GameEngine {
 
     let input: string | null = null;
     try {
+      // 开局尚未注入首条 user 消息时，先由轻量 setup agent 按需调 roll_inspiration 并通过 submit_setup 工具写回设定
+      if (this.gm.history.length === 1) {
+        const setupAgent = new Agent(this.gmConfig, buildSetupPrompt(), "setup");
+        await setupAgent.runTurn(buildSetupUserMessage(this.setup), {
+          tools: createSetupTools(this.setup, this.internals.state, hooks.onDebug),
+          onChunk: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
+          onReasoning: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
+          signal,
+          terminal: ["submit_setup"],
+        });
+        this.gm.history.push({
+          role: "user",
+          content: buildKickoffPrompt(this.setup, snapshot(this.internals)),
+        });
+        this.saveCheckpoint();
+      }
+
       for (let stalls = 0; !this.internals.ending; ) {
         this.internals.options = null;
         await this.gm.runTurn(input, {
@@ -233,7 +267,7 @@ export class GameEngine {
     const ending = this.internals.ending;
     if (ending) {
       this.checkpoint = null;
-      hooks.onEnding(ending, { ...this.internals.state });
+      hooks.onEnding(ending, structuredClone(this.internals.state));
     }
   }
 
