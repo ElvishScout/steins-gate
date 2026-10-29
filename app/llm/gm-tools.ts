@@ -68,6 +68,8 @@ export interface GmInternals {
   loadedSkills: Set<GmSkillId>;
   /** 本幕是否已结算（settle 幂等约束；present_options/declare_ending 成功时复位） */
   settledThisAct: boolean;
+  /** 本幕是否刚调用过 define_checkpoints（防止建好新检查点当幕就触发掉；present_options 成功时复位） */
+  definedCheckpointsThisAct: boolean;
   /** 当前收束范围已进行的幕数（节奏判定用；跃迁时清零，state.act 是全剧累计不清零） */
   actsThisLine: number;
   /** present_options 捕获的本幕选项 */
@@ -95,6 +97,7 @@ export function freshInternals(difficulty: Difficulty = "standard"): GmInternals
     fragileRatio: profile.fragileRatio,
     loadedSkills: new Set(),
     settledThisAct: false,
+    definedCheckpointsThisAct: false,
     actsThisLine: 0,
     options: null,
     ending: null,
@@ -300,7 +303,7 @@ export function createGmTools(
     {
       name: "define_checkpoints",
       description:
-        "定义当前收束范围的 4~6 个检查点（开局或跃迁后调用）。检查点构成世界线收束范围的双层结构：前中期节点为『过程支点』（允许玩家通过行动使其延后、变形或局部改写，体现阶段性改变感），最后一个节点为『最终收束点』（整条收束范围锁死的因果终点，前中期所有偏折最终在此合围）。每个节点需写明：1. upstream（上游依赖：承接哪些先前节点的因果，首节点为空数组）；2. conditions（承重条件：因果链断在哪一环就接不上），每条标注传导方式——cognition 经由当事人认知（可通过场面调度与信息差伪造观测），fact 经由客观事实（不可靠演戏伪造，但允许玩家调动前中期埋下的细微矛盾伏笔，以真实物理或现实手段提前置换或促成，即『金属乌帕』式伏笔）。每收束范围至多 1 个『全部条件均为 cognition』的节点；建议将链尾的最终收束点设为纯 cognition 节点或『cognition + 可由前期伏笔置换的 fact』复合节点。",
+        "定义当前收束范围的 4~6 个检查点（开局或跃迁后调用；复杂或长线题材宜定满 5~6 个，将中段各阶段的因果波折拆分为独立支点）。检查点构成世界线收束范围的双层结构：前中期节点为『过程支点』（允许玩家通过行动使其延后、变形或局部改写，体现阶段性改变感），最后一个节点为『最终收束点』（整条收束范围锁死的因果终点，前中期所有偏折最终在此合围）。所有检查点均代表接下来待经历的节点，已发生的开场或跃迁背景不占检查点名额。每个节点需写明：1. upstream（上游依赖：承接哪些先前节点的因果，首节点为空数组）；2. conditions（承重条件：因果链断在哪一环就接不上），每条标注传导方式——cognition 经由当事人认知（可通过场面调度与信息差伪造观测），fact 经由客观事实（不可靠演戏伪造，但允许玩家调动前中期埋下的细微矛盾伏笔，以真实物理或现实手段提前置换或促成，即『金属乌帕』式伏笔）。每收束范围至多 1 个『全部条件均为 cognition』的节点；建议将链尾的最终收束点设为纯 cognition 节点或『cognition + 可由前期伏笔置换的 fact』复合节点。",
       parameters: {
         type: "object",
         properties: {
@@ -376,10 +379,12 @@ export function createGmTools(
           ...c,
           status: "pending" as const,
         }));
+        gm.definedCheckpointsThisAct = true;
         return {
           ok: true,
           count: gm.state.checkpoints.length,
-          message: "检查点因果链已建立。请继续思考并写出本幕小说正文，随后调用 present_options 将选择权交给玩家。",
+          message:
+            "检查点因果链已建立（新定义的检查点代表后续待推进的节点，本幕不可立即调用 update_checkpoint 触发）。请继续思考并写出本幕小说正文，随后调用 present_options 将选择权交给玩家。",
         };
       },
     },
@@ -399,6 +404,11 @@ export function createGmTools(
       run(args) {
         const cp = gm.state.checkpoints.find((c) => c.id === args.id);
         if (!cp) throw new Error(`找不到检查点 ${String(args.id)}`);
+        if (gm.definedCheckpointsThisAct && (args.status === "triggered" || args.status === "deceived")) {
+          throw new Error(
+            `本幕刚调用 define_checkpoints 建立新检查点链，不得在同一幕内直接将新检查点 ${cp.id} 标为 ${String(args.status)}。新检查点必须留待后续回合由玩家互动推进；若某事件在跃迁落点时已然发生，请作为新世界线的开场背景描写，不要占用新检查点名额。`,
+          );
+        }
         if (!gm.loadedSkills.has("reading-steiner") && (args.status === "pending" || cp.status !== "pending")) {
           throw new Error(
             `检查点 ${cp.id} 当前已是 ${cp.status} 状态，常规模式下不可回溯或重置检查点。`,
@@ -419,13 +429,15 @@ export function createGmTools(
         cp.status = args.status as Checkpoint["status"];
         if (typeof args.note === "string") cp.note = args.note;
         const allDone = gm.state.checkpoints.length > 0 && gm.state.checkpoints.every((c) => c.status !== "pending");
+        const hasReadingSteiner = gm.loadedSkills.has("reading-steiner");
         return {
           ok: true,
           checkpoint: cp,
           ...(allDone
             ? {
-                message:
-                  "当前收束范围的所有检查点已尘埃落定！请调用 load_skill({ id: 'el-psy-kongroo' }) 加载终幕与年鉴规范，写出终幕正文后以空选项 present_options({ options: [] }) 交由玩家作最终回应。",
+                message: hasReadingSteiner
+                  ? "当前收束范围的最后一个检查点已达成。若故事尚处于时间回溯、跨线抗争或化解前置因果的中途阶段，请继续递交 2~4 个分支选项（present_options）推进回溯博弈（回溯后可用 update_checkpoint 将相关节点重置回 pending）；若全剧主线已彻底走完，请调用 load_skill({ id: 'el-psy-kongroo' }) 加载终幕规范并以空选项 present_options({ options: [] }) 收束全篇。"
+                  : "当前收束范围的所有检查点已尘埃落定！请调用 load_skill({ id: 'el-psy-kongroo' }) 加载终幕与年鉴规范，写出终幕正文后以空选项 present_options({ options: [] }) 交由玩家作最终回应。",
               }
             : {}),
         };
@@ -548,6 +560,7 @@ export function createGmTools(
         const action = await requestInput(opts.map(String));
         gm.options = opts.map(String);
         gm.settledThisAct = false;
+        gm.definedCheckpointsThisAct = false;
         return `${snapshot(gm)}\n[玩家行动] ${action}`;
       },
     },
