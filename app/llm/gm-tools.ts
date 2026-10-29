@@ -47,7 +47,7 @@ export function jumpReadiness(
   breach: boolean;
 } {
   const fund = s.contradictions.filter((c) => c.status === "active" && c.magnitude === "fundamental");
-  // 每个吸引子场区间宽度恒为 1%（[barrier - 1, barrier)），脆弱阈值按当前区间进度计算
+  // 每个世界线收束范围区间宽度恒为 1%（[barrier - 1, barrier)），脆弱阈值按当前区间进度计算
   const lower = Math.max(0, Math.round(s.barrier) - 1);
   const fragile = s.divergence >= round6(lower + fragileRatio);
   const breach = fund.some((c) => c.breach);
@@ -300,7 +300,7 @@ export function createGmTools(
     {
       name: "define_checkpoints",
       description:
-        "定义当前收束范围的 4~6 个检查点（开局或跃迁后调用）。检查点构成吸引子场的双层结构：前中期节点为『过程支点』（允许玩家通过行动使其延后、变形或局部改写，体现阶段性改变感），最后一个节点为『终极吸引子』（整条收束范围锁死的因果终点，前中期所有偏折最终在此合围）。每个节点需写明：1. upstream（上游依赖：承接哪些先前节点的因果，首节点为空数组）；2. conditions（承重条件：因果链断在哪一环就接不上），每条标注传导方式——cognition 经由当事人认知（可通过场面调度与信息差伪造观测），fact 经由客观事实（不可靠演戏伪造，但允许玩家调动前中期埋下的细微矛盾伏笔，以真实物理或现实手段提前置换或促成，即『金属乌帕』式伏笔）。每收束范围至多 1 个『全部条件均为 cognition』的节点；建议将链尾的终极吸引子设为纯 cognition 窄门或『cognition + 可由前期伏笔置换的 fact』复合窄门。",
+        "定义当前收束范围的 4~6 个检查点（开局或跃迁后调用）。检查点构成世界线收束范围的双层结构：前中期节点为『过程支点』（允许玩家通过行动使其延后、变形或局部改写，体现阶段性改变感），最后一个节点为『最终收束点』（整条收束范围锁死的因果终点，前中期所有偏折最终在此合围）。每个节点需写明：1. upstream（上游依赖：承接哪些先前节点的因果，首节点为空数组）；2. conditions（承重条件：因果链断在哪一环就接不上），每条标注传导方式——cognition 经由当事人认知（可通过场面调度与信息差伪造观测），fact 经由客观事实（不可靠演戏伪造，但允许玩家调动前中期埋下的细微矛盾伏笔，以真实物理或现实手段提前置换或促成，即『金属乌帕』式伏笔）。每收束范围至多 1 个『全部条件均为 cognition』的节点；建议将链尾的最终收束点设为纯 cognition 节点或『cognition + 可由前期伏笔置换的 fact』复合节点。",
       parameters: {
         type: "object",
         properties: {
@@ -369,7 +369,7 @@ export function createGmTools(
         const pureCognition = (list as Checkpoint[]).filter((c) => c.conditions.every((x) => x.via === "cognition"));
         if (pureCognition.length > 1) {
           throw new Error(
-            "每个收束范围至多 1 个'全部承重条件均为 cognition'的检查点（宜放在链尾或弱下游，作为通往 SG 线式结局的窄门），请重发。",
+            "每个收束范围至多 1 个'全部承重条件均为 cognition'的检查点（宜放在链尾或弱下游，作为通往命运石之门线结局的突破口），请重发。",
           );
         }
         gm.state.checkpoints = (list as Omit<Checkpoint, "status">[]).map((c) => ({
@@ -457,7 +457,7 @@ export function createGmTools(
     {
       name: "jump_worldline",
       description:
-        "执行世界线跃迁。仅当未消化的根本矛盾撕裂因果链（settle 或 digest_contradiction 返回 jumpReady=true）时可调用。调用后旧收束范围未触发的检查点自动作废，读数跨过整数壁垒进入新吸引子场区间。跃迁在小说叙事中必须无痕衔接：不写时空扭曲或超自然异象，只通过人物处境、关系或环境细节的微妙变化自然延续故事。",
+        "执行世界线跃迁。仅当未消化的根本矛盾撕裂因果链（settle 或 digest_contradiction 返回 jumpReady=true）时可调用。调用后旧收束范围未触发的检查点自动作废，读数跨过整数壁垒进入新世界线收束范围区间。跃迁在小说叙事中必须无痕衔接：不写时空扭曲或超自然异象，只通过人物处境、关系或环境细节的微妙变化自然延续故事。",
       parameters: {
         type: "object",
         properties: {
