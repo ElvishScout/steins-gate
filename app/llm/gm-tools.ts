@@ -18,9 +18,9 @@ const round6 = (x: number): number => Math.round(x * 1e6) / 1e6;
  * 软上限后在 settle 返回里持续催推进；硬上限后 present_options 拒绝再开新场景；
  * 全局极限幕数后只剩 declare_ending 一条路。防止对局无限发散。
  */
-const SOFT_ACTS_PER_LINE = 16;
-const HARD_ACTS_PER_LINE = 24;
-const MAX_TOTAL_ACTS = 48;
+const SOFT_ACTS_PER_LINE = 20;
+const HARD_ACTS_PER_LINE = 30;
+const MAX_TOTAL_ACTS = 60;
 
 /** 自由输入的矛盾量级由幅度推定（自由输入只是来源，账本上只记三种量级）。 */
 function magnitudeOf(tier: string, absDelta: number): ContradictionMagnitude | null {
@@ -313,7 +313,7 @@ export function createGmTools(
     {
       name: "define_checkpoints",
       description:
-        "定义当前收束范围的 4~6 个检查点（开局或跃迁后调用；复杂或长线题材宜定满 5~6 个，将中段各阶段的因果波折拆分为独立支点）。检查点构成世界线收束范围的双层结构：前中期节点为『过程支点』（允许玩家通过行动使其延后、变形或局部改写，体现阶段性改变感），最后一个节点为『最终收束点』（整条收束范围锁死的因果终点，前中期所有偏折最终在此合围）。所有检查点均代表接下来待经历的节点，已发生的开场或跃迁背景不占检查点名额。每个节点需写明：1. upstream（上游依赖：承接哪些先前节点的因果，首节点为空数组）；2. conditions（承重条件：因果链断在哪一环就接不上），每条标注传导方式——cognition 经由当事人认知（可通过场面调度与信息差伪造观测），fact 经由客观事实（不可靠演戏伪造，但允许玩家调动前中期埋下的细微矛盾伏笔，以真实物理或现实手段提前置换或促成，即『金属乌帕』式伏笔）。每收束范围至多 1 个『全部条件均为 cognition』的节点；建议将链尾的最终收束点设为纯 cognition 节点或『cognition + 可由前期伏笔置换的 fact』复合节点。",
+        "定义当前收束范围的 4~6 个检查点（开局或跃迁后调用；复杂或长线题材宜定满 5~6 个，将中段各阶段的因果波折拆分为独立支点）。检查点构成世界线收束范围的双层结构：前中期节点为『过程支点』（允许玩家通过行动使其延后、变形或局部改写，体现阶段性改变感），最后一个节点为『最终收束点』（整条收束范围锁死的因果终点，前中期所有偏折最终在此合围）。所有检查点均代表接下来待经历的节点，已发生的开场或跃迁背景不占检查点名额。每个节点需写明：1. upstream（上游依赖：承接哪些先前节点的因果，首节点为空数组）；2. conditions（承重条件：因果链断在哪一环就接不上），每条标注传导方式——cognition 经由特定观测者的持续主观认知（唯有让该观测者始终确信表象并继续履行下游因果，才可通过场面调度与信息差伪造），fact 经由客观事实（不可靠演戏伪造，但允许玩家调动前中期埋下的矛盾伏笔，以真实物理或现实手段提前置换或促成，即『金属乌帕』式伏笔）。每收束范围至多 1 个『全部条件均为 cognition』的节点；若最终收束点承担的是迫使主角跃迁的客观死局则设为纯 fact 节点，仅在节点因果真正取决于特定观测表象时才设为可欺骗节点。",
       parameters: {
         type: "object",
         properties: {
@@ -412,7 +412,7 @@ export function createGmTools(
     {
       name: "update_checkpoint",
       description:
-        "更新检查点状态：triggered 已触发（含顺应人情事理的自然收束、路径重接，或玩家以其他真实方式主动达成该节点的因果功能）/ deceived 已成功欺骗世界（在满足表面因果与认知条件的同时，暗中改写了实质结果）/ void 作废（跃迁时由引擎自动处理）。标记 deceived 时，必须在 note 中逐条说明各承重条件如何被满足（cognition 条件如何瞒过观测者、fact 条件如何被真实促成）。",
+        "更新检查点状态：triggered 已触发（含顺应人情事理的自然收束、路径重接，或玩家以其他真实方式主动达成该节点的因果功能）/ deceived 已成功欺骗世界（仅限玩家在知晓收束规律后主动设计欺骗方案，在让关键观测者持续确信表面结果并履行下游因果的同时，暗中改写了实质结果；正面硬拼或目标当场苏醒致观测认知瓦解的绝不可标为 deceived）/ void 作废（跃迁时由引擎自动处理）。标记 deceived 时，必须在 note 中逐条说明各承重条件如何被满足（哪位观测者如何被持续瞒过并推动下游因果、fact 条件如何被真实促成）。",
       parameters: {
         type: "object",
         properties: {
@@ -443,7 +443,7 @@ export function createGmTools(
           }
           if (typeof args.note !== "string" || !args.note.trim()) {
             throw new Error(
-              "标记 deceived 必须在 note 里逐条说明承重条件如何被保全：cognition 条件如何伪造、fact 条件如何被真实促成。",
+              "标记 deceived 必须在 note 里逐条说明承重条件如何被保全：哪位关键观测者如何持续确信假象并履行下游因果（不可出现受骗观测者当场看到目标苏醒导致认知瓦解）、fact 条件如何由前期伏笔真实促成，且欺骗方案必须源于玩家的主动设局而非被动巧合。",
             );
           }
         }
@@ -490,12 +490,12 @@ export function createGmTools(
     {
       name: "jump_worldline",
       description:
-        "执行世界线跃迁。仅当未消化的根本矛盾撕裂因果链（settle 或 digest_contradiction 返回 jumpReady=true）时可调用。调用后旧收束范围未触发的检查点自动作废，读数跨过整数壁垒进入新世界线收束范围区间。跃迁在小说叙事中必须无痕衔接：不写时空扭曲或超自然异象，只通过人物处境、关系或环境细节的微妙变化自然延续故事。",
+        "执行世界线跃迁。常规模式下仅当未消化的根本矛盾撕裂因果链（settle 或 digest_contradiction 返回 jumpReady=true）时可调用；已加载 reading-steiner 模块时，剧中人物可通过自造或掌握的时空干涉手段主动发起跃迁（不受 jumpReady 与单向递增区间限制）。调用后旧收束范围未触发的检查点自动作废，随后须调用 define_checkpoints 定义新检查点。",
       parameters: {
         type: "object",
         properties: {
-          worldline: { type: "string", description: "新收束范围代号（β/γ/δ…依次命名）" },
-          divergence: { type: "number", description: "跃迁后的读数，必须落在新区间内（六位小数）" },
+          worldline: { type: "string", description: "新世界线/收束范围代号（如 α/β/γ/δ…）" },
+          divergence: { type: "number", description: "跃迁后的读数（六位小数）" },
           note: { type: "string", description: "新世界线的因果基调变化备注" },
         },
         required: ["worldline", "divergence"],
@@ -503,20 +503,27 @@ export function createGmTools(
       run(args) {
         const s = gm.state;
         const jr = jumpReadiness(s, gm.fragileRatio);
-        if (!jr.ready && !gm.loadedSkills.has("reading-steiner")) {
+        const hasReadingSteiner = gm.loadedSkills.has("reading-steiner");
+        if (!jr.ready && !hasReadingSteiner) {
           throw new Error(
             `因果链尚可自洽，不许跃迁（未消化根本矛盾×${jr.activeFundamental}${jr.fragile ? "，贴线脆弱" : ""}）。跳线的唯一条件是矛盾：根本矛盾通常需积累 2 个以上，贴线脆弱（读数达到当前区间 ${Math.round(gm.fragileRatio * 100)}%）时 1 个即可，或直接击穿核心节点。细微/显著矛盾无论积累多少都永不跳线。`,
           );
         }
-        // 区间宽度恒 1%、整数边界即壁垒：新区间 = [round(旧壁垒), round(旧壁垒)+1)
-        const lower = Math.round(s.barrier);
-        const newBarrier = lower + 1;
         const d = typeof args.divergence === "number" ? args.divergence : NaN;
-        if (Number.isNaN(d) || d < lower || d >= newBarrier) {
-          throw new Error(
-            `跃迁后的读数必须落在新区间 [${lower.toFixed(6)}%, ${newBarrier.toFixed(6)}%) 内，收到 ${String(args.divergence)}。`,
-          );
+        if (Number.isNaN(d) || d < 0) {
+          throw new Error(`跃迁后的读数必须是非负数字，收到 ${String(args.divergence)}。`);
         }
+        if (!hasReadingSteiner) {
+          // 常规模式：区间宽度恒 1%、整数边界即壁垒，新区间 = [round(旧壁垒), round(旧壁垒)+1)
+          const lower = Math.round(s.barrier);
+          const upper = lower + 1;
+          if (d < lower || d >= upper) {
+            throw new Error(
+              `跃迁后的读数必须落在新区间 [${lower.toFixed(6)}%, ${upper.toFixed(6)}%) 内，收到 ${String(args.divergence)}。`,
+            );
+          }
+        }
+        const newBarrier = Math.floor(d) + 1;
         s.worldline = str(args.worldline, "worldline");
         s.barrier = newBarrier;
         s.divergence = round6(d);
@@ -595,7 +602,8 @@ export function createGmTools(
           tier: { type: "string", enum: ["convergence", "branch", "steins-gate"] },
           title: {
             type: "string",
-            description: "结局标题（格式：「<世界线> 世界线 · <六位小数读数>% <贴合故事意境的副标题>」）",
+            description:
+              "结局标题（格式：「<世界线> 世界线 · <六位小数读数>% <贴合故事意境的副标题>」，其中世界线代号与读数须与当前真实状态一致；仅在达成 steins-gate 真结局且已跨入目标区间时可定格为 1.048596%）",
           },
           yearbook: { type: "string", description: "世界线年鉴全文（复盘关键抉择、收束/跃迁/欺骗时刻与伏笔回收）" },
         },
