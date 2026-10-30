@@ -116,7 +116,11 @@ async function handleProxy(req: NextRequest): Promise<Response> {
   const normalizedPath = targetUrl.pathname.replace(/\/+$/, "") || "/";
   if (!matchAny(ALLOWED_PATH_PATTERNS, normalizedPath)) {
     return Response.json(
-      { error: { message: `代理不允许访问该路径：${targetUrl.pathname}（仅支持 OpenAI / Gemini 兼容 API 端点）` } },
+      {
+        error: {
+          message: `代理不允许访问该路径：${targetUrl.pathname}（仅支持 OpenAI / Gemini 兼容 API 端点）`,
+        },
+      },
       { status: 403 },
     );
   }

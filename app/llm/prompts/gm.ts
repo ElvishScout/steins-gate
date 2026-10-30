@@ -153,11 +153,7 @@ export const GM_SKILLS: Record<GmSkillId, { name: string; when: string; content:
  * 构造开局首条 user 消息：将动态的本局设定与开局指令放在一起，
  * 避免与 system prompt 重复。
  */
-export function buildKickoffPrompt(
-  setup: GameSetup,
-  stateSnapshot: string,
-  hasInitialCheckpoints = false,
-): string {
+export function buildKickoffPrompt(setup: GameSetup, stateSnapshot: string, hasInitialCheckpoints = false): string {
   const barrier = barrierOf(setup.difficulty);
   const profile = profileOf(setup.difficulty);
   const genreText = setup.genre?.trim() || "未指定";

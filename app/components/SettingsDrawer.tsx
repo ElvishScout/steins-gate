@@ -255,7 +255,7 @@ export function SettingsDrawer(props: {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex h-full w-full min-w-0 max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-2xl sm:max-h-[90vh]">
+      <div className="flex h-full w-full max-w-3xl min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-2xl sm:max-h-[90vh]">
         {/* 顶栏 */}
         <div className="flex items-center justify-between gap-3 border-b border-line bg-card px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -410,7 +410,7 @@ export function SettingsDrawer(props: {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-0.5">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-soft hover:text-ink select-none">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-soft select-none hover:text-ink">
                     <input
                       type="checkbox"
                       className="h-4 w-4 accent-vermilion"

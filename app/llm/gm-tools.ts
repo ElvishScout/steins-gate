@@ -80,10 +80,7 @@ export interface GmInternals {
   ending: { tier: string; title: string; yearbook: string } | null;
 }
 
-export function freshInternals(
-  difficulty: Difficulty = "standard",
-  initialCheckpoints?: Checkpoint[],
-): GmInternals {
+export function freshInternals(difficulty: Difficulty = "standard", initialCheckpoints?: Checkpoint[]): GmInternals {
   const profile = profileOf(difficulty);
   const [minDiv, maxDiv] = profile.initialRange;
   const initialDiv = round6(minDiv + Math.random() * (maxDiv - minDiv));
@@ -218,7 +215,10 @@ export function createGmTools(
           summary: { type: "string", description: "玩家行动及其直接后果的一句话概括" },
           tier: { type: "string", enum: Object.keys(TIER_RANGES) },
           delta: { type: "number", description: "幅度绝对值（六位小数，如 0.027436）" },
-          related: { type: "string", description: "关联的检查点 id（该行动所铺垫、试探或对抗的节点）" },
+          related: {
+            type: "string",
+            description: "关联的检查点 id（该行动所铺垫、试探或对抗的节点）",
+          },
           breach: {
             type: "boolean",
             description:
@@ -431,9 +431,7 @@ export function createGmTools(
           );
         }
         if (!gm.loadedSkills.has("reading-steiner") && (args.status === "pending" || cp.status !== "pending")) {
-          throw new Error(
-            `检查点 ${cp.id} 当前已是 ${cp.status} 状态，常规模式下不可回溯或重置检查点。`,
-          );
+          throw new Error(`检查点 ${cp.id} 当前已是 ${cp.status} 状态，常规模式下不可回溯或重置检查点。`);
         }
         if (args.status === "deceived") {
           if (!cp.conditions.some((x) => x.via === "cognition")) {
@@ -472,7 +470,10 @@ export function createGmTools(
         type: "object",
         properties: {
           id: { type: "string", description: "矛盾 id（状态快照中的 C1/C2/…）" },
-          void: { type: "boolean", description: "true = 作废（欺骗失败导致伏笔暴露失效），缺省 = 自然消化" },
+          void: {
+            type: "boolean",
+            description: "true = 作废（欺骗失败导致伏笔暴露失效），缺省 = 自然消化",
+          },
           note: { type: "string", description: "消化或作废的具体原因" },
         },
         required: ["id"],
@@ -484,7 +485,12 @@ export function createGmTools(
         c.status = args.void === true ? "void" : "digested";
         if (typeof args.note === "string") c.note = args.note;
         const jr = jumpReadiness(gm.state, gm.fragileRatio);
-        return { ok: true, contradiction: c, activeFundamental: jr.activeFundamental, jumpReady: jr.ready };
+        return {
+          ok: true,
+          contradiction: c,
+          activeFundamental: jr.activeFundamental,
+          jumpReady: jr.ready,
+        };
       },
     },
     {
@@ -605,7 +611,10 @@ export function createGmTools(
             description:
               "结局标题（格式：「<世界线> 世界线 · <六位小数读数>% <贴合故事意境的副标题>」，其中世界线代号与读数须与当前真实状态一致；仅在达成 steins-gate 真结局且已跨入目标区间时可定格为 1.048596%）",
           },
-          yearbook: { type: "string", description: "世界线年鉴全文（复盘关键抉择、收束/跃迁/欺骗时刻与伏笔回收）" },
+          yearbook: {
+            type: "string",
+            description: "世界线年鉴全文（复盘关键抉择、收束/跃迁/欺骗时刻与伏笔回收）",
+          },
         },
         required: ["tier", "title", "yearbook"],
       },

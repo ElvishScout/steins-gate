@@ -155,8 +155,7 @@ export class GameEngine {
     // 也不发给玩家；但 Agent 内部仍按 assistant content 记入历史并在后续轮次原样送回。
     const readyToNarrate = () =>
       (!this.needSettle || this.internals.settledThisAct) &&
-      (this.internals.actsThisLine > 0 ||
-        this.internals.state.checkpoints.some((c) => c.status === "pending"));
+      (this.internals.actsThisLine > 0 || this.internals.state.checkpoints.some((c) => c.status === "pending"));
     const onChunk = (d: string) => {
       if (!readyToNarrate()) {
         hooks.onDebug?.({ type: "reasoning", text: d });
@@ -171,9 +170,7 @@ export class GameEngine {
       (options) => {
         // 工具物理：没有正文的场景不许递交（工具先行的模型会把正文推到下一幕，全程错位）
         if (!this.sceneText.trim()) {
-          throw new Error(
-            "本幕还没有叙事正文：先输出正文（会流式展示给玩家），再递交选项。玩家只能通过正文了解故事。",
-          );
+          throw new Error("本幕还没有叙事正文：先输出正文（会流式展示给玩家），再递交选项。玩家只能通过正文了解故事。");
         }
         return new Promise<string>((resolve, reject) => {
           this.cancelInput = reject;
@@ -232,7 +229,7 @@ export class GameEngine {
         this.saveCheckpoint();
       }
 
-      for (let stalls = 0; !this.internals.ending; ) {
+      for (let stalls = 0; !this.internals.ending;) {
         this.internals.options = null;
         await this.gm.runTurn(input, {
           tools,

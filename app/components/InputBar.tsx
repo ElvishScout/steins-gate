@@ -31,7 +31,7 @@ export function InputBar(props: { options: string[]; onSubmit: (action: string) 
 
       <div className="flex items-center gap-1.5">
         <input
-          className="flex-1 rounded-lg border border-line bg-paper/60 px-3 py-1.5 text-sm text-ink placeholder:text-ink-soft/60 transition focus:border-vermilion focus:bg-card focus:outline-none"
+          className="flex-1 rounded-lg border border-line bg-paper/60 px-3 py-1.5 text-sm text-ink transition placeholder:text-ink-soft/60 focus:border-vermilion focus:bg-card focus:outline-none"
           placeholder="或者自由输入任何行动（按 Enter 发送）…"
           value={freeInput}
           onChange={(e) => setFreeInput(e.target.value)}

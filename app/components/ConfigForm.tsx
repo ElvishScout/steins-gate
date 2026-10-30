@@ -52,10 +52,7 @@ export function createDefaultSettingsState(): ModelSettingsState {
 }
 
 /** 将角色指派与提供商配置解析为引擎可直接使用的 LLMConfig */
-export function resolveRoleConfig(
-  state: ModelSettingsState,
-  role: "gm" | "player",
-): LLMConfig | null {
+export function resolveRoleConfig(state: ModelSettingsState, role: "gm" | "player"): LLMConfig | null {
   const assign = state[role];
   const provider = state.providers.find((p) => p.id === assign.providerId);
   if (!provider) return null;

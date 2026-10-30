@@ -37,11 +37,7 @@ function formatToolBlock(ev: Extract<GmDebugEvent, { type: "tool" }>): string {
   ].join("\n");
 }
 
-function formatDebugEvents(
-  debug: DebugInfo | undefined,
-  includeReasoning: boolean,
-  includeTools: boolean,
-): string[] {
+function formatDebugEvents(debug: DebugInfo | undefined, includeReasoning: boolean, includeTools: boolean): string[] {
   if (!debug || (!includeReasoning && !includeTools)) return [];
   const blocks: string[] = [];
   for (const ev of debug.events) {

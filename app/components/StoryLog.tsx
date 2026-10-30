@@ -74,10 +74,7 @@ export function StoryLog(props: {
       {props.entries.map((e, i) => {
         if (e.kind === "scene") {
           return (
-            <article
-              key={i}
-              className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs print:shadow-none"
-            >
+            <article key={i} className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs print:shadow-none">
               <div className="mb-1.5 flex items-center justify-between border-b border-line/60 pb-1">
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-ink-soft">
                   <span className="h-1.5 w-1.5 rounded-full bg-vermilion/80" />
@@ -97,7 +94,7 @@ export function StoryLog(props: {
           return (
             <div key={i}>
               {props.showHidden && e.debug && e.debug.events.length > 0 && <DebugNote info={e.debug} />}
-              <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
+              <div className="rounded-lg border border-l-3 border-vermilion/25 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
                 <span className="font-serif whitespace-pre-wrap text-vermilion">{e.text}</span>
               </div>
             </div>
@@ -142,7 +139,7 @@ export function StoryLog(props: {
           )}
           <div className="font-serif text-[15.5px] leading-[1.75] whitespace-pre-wrap text-ink">
             {props.live.narration}
-            {props.busy && <span className="animate-caret ml-0.5 text-vermilion">▌</span>}
+            {props.busy && <span className="ml-0.5 animate-caret text-vermilion">▌</span>}
           </div>
         </article>
       )}
@@ -158,10 +155,10 @@ export function StoryLog(props: {
               }}
             />
           )}
-          <div className="rounded-lg border border-vermilion/25 border-l-3 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
+          <div className="rounded-lg border border-l-3 border-vermilion/25 border-l-vermilion bg-vermilion/4 px-3 py-1.5 text-sm">
             <span className="font-serif whitespace-pre-wrap text-vermilion">
               {props.playerLive.text}
-              {props.busy && <span className="animate-caret ml-0.5 text-vermilion">▌</span>}
+              {props.busy && <span className="ml-0.5 animate-caret text-vermilion">▌</span>}
             </span>
           </div>
         </div>

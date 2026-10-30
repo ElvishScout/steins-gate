@@ -86,9 +86,7 @@ export function TopBar(props: {
               <button
                 type="button"
                 className={`inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2.5 text-xs font-medium transition ${
-                  saveMenuOpen
-                    ? "border-ink bg-ink text-card"
-                    : "border-line bg-card text-ink hover:bg-paper-dim"
+                  saveMenuOpen ? "border-ink bg-ink text-card" : "border-line bg-card text-ink hover:bg-paper-dim"
                 }`}
                 onClick={() => setSaveMenuOpen((v) => !v)}
                 title="保存对话历史为 Markdown 文件"
@@ -97,7 +95,7 @@ export function TopBar(props: {
               </button>
 
               {saveMenuOpen && (
-                <div className="absolute right-0 top-full z-40 mt-1.5 w-52 rounded-xl border border-line bg-card p-3 shadow-lg">
+                <div className="absolute top-full right-0 z-40 mt-1.5 w-52 rounded-xl border border-line bg-card p-3 shadow-lg">
                   <div className="mb-2 text-xs font-semibold text-ink">保存对话历史</div>
                   <div className="flex flex-col gap-1.5">
                     <label className="flex cursor-pointer items-center gap-2 text-xs text-ink select-none">

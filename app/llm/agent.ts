@@ -20,11 +20,7 @@ export class Agent {
   sessionId: string = crypto.randomUUID();
   history: ChatMessage[] = [];
 
-  constructor(
-    config: LLMConfig,
-    systemPrompt: string,
-    name = "agent",
-  ) {
+  constructor(config: LLMConfig, systemPrompt: string, name = "agent") {
     this.config = config;
     this.name = name;
     this.history.push({ role: "system", content: systemPrompt });

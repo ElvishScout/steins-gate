@@ -113,7 +113,7 @@ export function DebugNote({ info }: { info: DebugInfo; live?: boolean }) {
     return (
       <button
         type="button"
-        className="mb-1.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md border border-line/80 bg-paper px-2.5 py-1 text-left font-mono text-xs text-ink-soft transition hover:border-ink-soft/40 hover:text-ink select-none"
+        className="mb-1.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md border border-line/80 bg-paper px-2.5 py-1 text-left font-mono text-xs text-ink-soft transition select-none hover:border-ink-soft/40 hover:text-ink"
         onClick={() => setCollapsed(false)}
         title="展开隐藏推理与世界线状态"
       >
@@ -132,7 +132,7 @@ export function DebugNote({ info }: { info: DebugInfo; live?: boolean }) {
     <div className="mb-2 rounded-lg border border-line bg-paper p-2.5">
       <button
         type="button"
-        className="flex w-full cursor-pointer items-center justify-between text-left font-mono text-xs text-ink-soft hover:text-ink select-none"
+        className="flex w-full cursor-pointer items-center justify-between text-left font-mono text-xs text-ink-soft select-none hover:text-ink"
         onClick={() => setCollapsed(true)}
         title="折叠"
       >

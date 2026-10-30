@@ -144,8 +144,7 @@ export default function Home() {
     !!gmConfig?.baseURL &&
     !!gmConfig?.apiKey &&
     !!gmConfig?.model &&
-    (mode === "play" ||
-      (!!playerConfig?.baseURL && !!playerConfig?.apiKey && !!playerConfig?.model));
+    (mode === "play" || (!!playerConfig?.baseURL && !!playerConfig?.apiKey && !!playerConfig?.model));
 
   const makeHooks = (player: Agent | null): EngineHooks => ({
     onChunk: (d) => {
@@ -240,9 +239,7 @@ export default function Home() {
     engineRef.current = engine;
     // 观战模式：玩家侧也是一个 agent，由页面持有，作为 onScene 的输入来源
     const player =
-      mode === "spectate" && playerConfig
-        ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player")
-        : null;
+      mode === "spectate" && playerConfig ? new Agent(playerConfig, buildPlayerPrompt(playerStyle), "player") : null;
     playerRef.current = player;
     const setup: GameSetup = { genre: nextGenre, protagonist: nextProtagonist, difficulty };
     await runEngineTask(() => engine.play(setup, makeHooks(player), initialCheckpoints));

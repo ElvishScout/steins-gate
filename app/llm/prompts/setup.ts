@@ -2,6 +2,7 @@ import type { AgentTool } from "../agent";
 import type { GameSetup, GmDebugEvent, GmState } from "../types";
 
 /** 题材词库：宽泛、开放的故事类型与领域，留出充分的创作空间 */
+// prettier-ignore
 const GENRE_KEYWORDS: readonly string[] = [
   "都市日常", "职场博弈", "校园青春", "市井烟火", "家族往事",
   "悬疑推理", "历史风云", "江湖武侠", "边塞奇谭", "古典志怪",
@@ -14,6 +15,7 @@ const GENRE_KEYWORDS: readonly string[] = [
 ];
 
 /** 意象词库：凝练、多义的文学意象，可具象可隐喻，不限制具体情节 */
+// prettier-ignore
 const IMAGERY_KEYWORDS: readonly string[] = [
   "晨雾", "烈日", "初雪", "梅雨", "晚风", "潮汐", "余烬", "星轨",
   "钟摆", "倒影", "钥匙", "信笺", "渡口", "回声", "迷宫", "棋局",
@@ -24,6 +26,7 @@ const IMAGERY_KEYWORDS: readonly string[] = [
 ];
 
 /** 跨语言通用字母/音节开头种子（含元音与辅音）：用于打散模型默认的姓名采样偏好 */
+// prettier-ignore
 const PHONETIC_SEEDS: readonly string[] = [
   "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
   "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
@@ -52,11 +55,7 @@ export function rollInspiration() {
 }
 
 /** 构造开局设定子代理的工具集：roll_inspiration + submit_setup */
-export function createSetupTools(
-  setup: GameSetup,
-  state: GmState,
-  notify?: (ev: GmDebugEvent) => void,
-): AgentTool[] {
+export function createSetupTools(setup: GameSetup, state: GmState, notify?: (ev: GmDebugEvent) => void): AgentTool[] {
   const withNotify = (tool: AgentTool): AgentTool => {
     if (!notify) return tool;
     return {
@@ -67,9 +66,10 @@ export function createSetupTools(
           notify({
             type: "tool",
             name: tool.name,
-            args: tool.name === "roll_inspiration" && result && typeof result === "object"
-              ? (result as Record<string, unknown>)
-              : args,
+            args:
+              tool.name === "roll_inspiration" && result && typeof result === "object"
+                ? (result as Record<string, unknown>)
+                : args,
             state: structuredClone(state),
           });
           return result;
