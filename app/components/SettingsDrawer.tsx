@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LLMConfig, LLMProtocol } from "../llm/types";
 import {
   createEmptyProvider,
@@ -55,18 +55,18 @@ function RoleSelectorCard(props: {
       : (options[0]?.value ?? "");
 
   const selectClass =
-    "w-full rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink transition focus:border-vermilion focus:bg-card focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+    "w-full min-w-0 rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink transition focus:border-vermilion focus:bg-card focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-line bg-card p-4 shadow-2xs">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-line bg-card p-4 shadow-2xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-ink">{title}</span>
           <span className="rounded bg-paper-dim px-2 py-0.5 font-mono text-xs text-ink-soft">{badge}</span>
         </div>
         <button
           type="button"
-          className="cursor-pointer rounded-lg border border-line bg-paper-dim px-3 py-1 text-xs font-medium text-ink transition hover:bg-line/70 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 cursor-pointer rounded-lg border border-line bg-paper-dim px-3 py-1 text-xs font-medium text-ink transition hover:bg-line/70 disabled:cursor-not-allowed disabled:opacity-40"
           onClick={props.onTest}
           disabled={props.testing || !resolved?.baseURL || !resolved?.apiKey || !resolved?.model}
         >
@@ -135,6 +135,8 @@ export function SettingsDrawer(props: {
 }) {
   const { settings, onChange, onClose } = props;
   const [activeId, setActiveId] = useState<string>(() => settings.gm.providerId || settings.providers[0]?.id || "");
+  const providerItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const pendingScrollIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -143,6 +145,16 @@ export function SettingsDrawer(props: {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  // 新增提供商后把它滚动到列表可见区域（移动端为横向列表，桌面端为纵向列表）
+  useEffect(() => {
+    const id = pendingScrollIdRef.current;
+    if (!id) return;
+    const el = providerItemRefs.current[id];
+    if (!el) return;
+    pendingScrollIdRef.current = null;
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [settings.providers, activeId]);
 
   const activeProvider = settings.providers.find((p) => p.id === activeId) ?? settings.providers[0];
 
@@ -155,6 +167,7 @@ export function SettingsDrawer(props: {
 
   const addProvider = () => {
     const p = createEmptyProvider(settings.providers.length + 1);
+    pendingScrollIdRef.current = p.id;
     onChange({
       ...settings,
       providers: [...settings.providers, p],
@@ -230,7 +243,7 @@ export function SettingsDrawer(props: {
   const playerResolved = resolveRoleConfig(settings, "player");
 
   const inputClass =
-    "w-full rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink placeholder:text-ink-soft/55 transition focus:border-vermilion focus:bg-card focus:outline-none";
+    "w-full min-w-0 rounded-lg border border-line bg-paper/60 px-3 py-2 text-sm text-ink placeholder:text-ink-soft/55 transition focus:border-vermilion focus:bg-card focus:outline-none";
 
   const activeProtocol = activeProvider.protocol;
   const isGemini = activeProtocol === "gemini";
@@ -242,25 +255,24 @@ export function SettingsDrawer(props: {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-2xl">
+      <div className="flex h-full w-full min-w-0 max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-2xl sm:max-h-[90vh]">
         {/* 顶栏 */}
-        <div className="flex items-center justify-between border-b border-line bg-card px-6 py-4">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold text-ink">⚙ 模型与提供商配置</h2>
-            <span className="text-xs text-ink-soft">密钥仅保存在当前浏览器本地</span>
+        <div className="flex items-center justify-between gap-3 border-b border-line bg-card px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <h2 className="truncate text-base font-semibold text-ink">⚙ 模型与提供商配置</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-lg border border-line bg-paper px-3 py-1 text-xs font-medium text-ink-soft transition hover:bg-paper-dim hover:text-ink"
+            className="shrink-0 cursor-pointer rounded-lg border border-line bg-paper px-3 py-1 text-xs font-medium whitespace-nowrap text-ink-soft transition hover:bg-paper-dim hover:text-ink"
           >
             ✕ 关闭
           </button>
         </div>
 
-        <div className="flex flex-col gap-5 overflow-y-auto p-6">
+        <div className="flex min-w-0 flex-col gap-5 overflow-y-auto overscroll-none p-4 sm:p-6">
           {/* 角色模型指派区 */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
             <RoleSelectorCard
               title="GM 模型"
               badge="主持 · 必需"
@@ -288,9 +300,9 @@ export function SettingsDrawer(props: {
           </div>
 
           {/* 提供商管理区（左列列表 + 右列详情） */}
-          <div className="grid gap-5 rounded-xl border border-line bg-card p-5 shadow-2xs sm:grid-cols-[200px_1fr]">
+          <div className="grid min-w-0 gap-5 rounded-xl border border-line bg-card p-4 shadow-2xs sm:grid-cols-[200px_1fr] sm:p-5">
             {/* 提供商列表 */}
-            <div className="flex flex-col gap-2 border-b border-line pb-4 sm:border-r sm:border-b-0 sm:pr-4 sm:pb-0">
+            <div className="flex min-w-0 flex-col gap-2 border-b border-line pb-4 sm:border-r sm:border-b-0 sm:pr-4 sm:pb-0">
               <div className="flex items-center justify-between px-1">
                 <span className="text-xs font-semibold text-ink-soft">提供商列表</span>
                 <button
@@ -302,7 +314,7 @@ export function SettingsDrawer(props: {
                 </button>
               </div>
 
-              <div className="flex flex-row gap-1.5 overflow-x-auto sm:flex-col">
+              <div className="flex min-w-0 scroll-p-1 flex-row gap-1.5 overflow-x-auto pb-1 sm:flex-col sm:pb-0">
                 {settings.providers.map((p) => {
                   const isCurrent = p.id === activeProvider?.id;
                   const modelCount = p.models.filter((m) => m.trim()).length;
@@ -310,6 +322,9 @@ export function SettingsDrawer(props: {
                     <button
                       key={p.id}
                       type="button"
+                      ref={(el) => {
+                        providerItemRefs.current[p.id] = el;
+                      }}
                       onClick={() => setActiveId(p.id)}
                       className={`flex shrink-0 cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
                         isCurrent ? "bg-ink font-medium text-card" : "text-ink hover:bg-paper-dim"
@@ -331,9 +346,9 @@ export function SettingsDrawer(props: {
 
             {/* 当前选中提供商表单 */}
             {activeProvider && (
-              <div className="flex flex-col gap-3.5">
-                <div className="flex items-end justify-between gap-3">
-                  <div className="flex-1">
+              <div className="flex min-w-0 flex-col gap-3.5">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div className="min-w-0 flex-1">
                     <label className="mb-1 block text-xs font-medium text-ink-soft">提供商名称</label>
                     <input
                       className={`${inputClass} font-medium`}
@@ -346,7 +361,7 @@ export function SettingsDrawer(props: {
                     <button
                       type="button"
                       onClick={() => removeProvider(activeProvider.id)}
-                      className="shrink-0 cursor-pointer rounded-lg border border-line px-3 py-2 text-xs font-medium text-ink-soft transition hover:border-vermilion/40 hover:text-vermilion"
+                      className="shrink-0 cursor-pointer rounded-lg border border-line px-3 py-2 text-xs font-medium whitespace-nowrap text-ink-soft transition hover:border-vermilion/40 hover:text-vermilion"
                       title="删除此提供商"
                     >
                       删除提供商
@@ -369,8 +384,8 @@ export function SettingsDrawer(props: {
                   </select>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
+                <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                  <div className="min-w-0">
                     <label className="mb-1 block text-xs font-medium text-ink-soft">API 端点 (baseURL)</label>
                     <input
                       className={inputClass}
@@ -382,7 +397,7 @@ export function SettingsDrawer(props: {
                     />
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     <label className="mb-1 block text-xs font-medium text-ink-soft">API Key</label>
                     <input
                       className={inputClass}
@@ -432,69 +447,71 @@ export function SettingsDrawer(props: {
                         Boolean(trimmed);
 
                       return (
-                        <div key={idx} className="flex items-center gap-2">
+                        <div key={idx} className="flex min-w-0 items-center gap-2">
                           <input
-                            className={inputClass}
+                            className={`${inputClass} flex-1`}
                             placeholder={isGemini ? "模型 ID，如 gemini-3-pro-preview" : "模型 ID，如 gpt-4o"}
                             value={m}
                             onChange={(e) => updateModelAt(idx, e.target.value)}
                           />
-                          {trimmed && (
-                            <>
+                          <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                            {trimmed && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onChange({
+                                      ...settings,
+                                      gm: {
+                                        ...settings.gm,
+                                        providerId: activeProvider.id,
+                                        model: trimmed,
+                                      },
+                                    })
+                                  }
+                                  className={`cursor-pointer rounded-lg border px-2.5 py-1.5 font-mono text-xs transition ${
+                                    isGm
+                                      ? "border-vermilion bg-vermilion/10 font-semibold text-vermilion"
+                                      : "border-line bg-paper text-ink-soft hover:text-ink"
+                                  }`}
+                                  title="设为 GM 模型"
+                                >
+                                  GM
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onChange({
+                                      ...settings,
+                                      player: {
+                                        ...settings.player,
+                                        providerId: activeProvider.id,
+                                        model: trimmed,
+                                      },
+                                    })
+                                  }
+                                  className={`cursor-pointer rounded-lg border px-2.5 py-1.5 font-mono text-xs transition ${
+                                    isPlayer
+                                      ? "border-vermilion bg-vermilion/10 font-semibold text-vermilion"
+                                      : "border-line bg-paper text-ink-soft hover:text-ink"
+                                  }`}
+                                  title="设为玩家模型"
+                                >
+                                  玩家
+                                </button>
+                              </>
+                            )}
+                            {activeProvider.models.length > 1 && (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  onChange({
-                                    ...settings,
-                                    gm: {
-                                      ...settings.gm,
-                                      providerId: activeProvider.id,
-                                      model: trimmed,
-                                    },
-                                  })
-                                }
-                                className={`shrink-0 cursor-pointer rounded-lg border px-2.5 py-1.5 font-mono text-xs transition ${
-                                  isGm
-                                    ? "border-vermilion bg-vermilion/10 font-semibold text-vermilion"
-                                    : "border-line bg-paper text-ink-soft hover:text-ink"
-                                }`}
-                                title="设为 GM 模型"
+                                onClick={() => removeModelAt(idx)}
+                                className="cursor-pointer rounded-lg px-2 py-1.5 text-xs text-ink-soft hover:bg-paper-dim hover:text-vermilion"
+                                title="移除该模型"
                               >
-                                GM
+                                ✕
                               </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onChange({
-                                    ...settings,
-                                    player: {
-                                      ...settings.player,
-                                      providerId: activeProvider.id,
-                                      model: trimmed,
-                                    },
-                                  })
-                                }
-                                className={`shrink-0 cursor-pointer rounded-lg border px-2.5 py-1.5 font-mono text-xs transition ${
-                                  isPlayer
-                                    ? "border-vermilion bg-vermilion/10 font-semibold text-vermilion"
-                                    : "border-line bg-paper text-ink-soft hover:text-ink"
-                                }`}
-                                title="设为玩家模型"
-                              >
-                                玩家
-                              </button>
-                            </>
-                          )}
-                          {activeProvider.models.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeModelAt(idx)}
-                              className="shrink-0 cursor-pointer rounded-lg px-2 py-1.5 text-xs text-ink-soft hover:bg-paper-dim hover:text-vermilion"
-                              title="移除该模型"
-                            >
-                              ✕
-                            </button>
-                          )}
+                            )}
+                          </div>
                         </div>
                       );
                     })}
