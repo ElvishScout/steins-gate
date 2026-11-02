@@ -56,6 +56,9 @@ export function rollInspiration() {
 
 /** 构造开局设定子代理的工具集：roll_inspiration + submit_setup */
 export function createSetupTools(setup: GameSetup, state: GmState, notify?: (ev: GmDebugEvent) => void): AgentTool[] {
+  const rawGenre = setup.genre?.trim() ?? "";
+  const rawProtagonist = setup.protagonist?.trim() ?? "";
+
   const withNotify = (tool: AgentTool): AgentTool => {
     if (!notify) return tool;
     return {
@@ -123,8 +126,11 @@ export function createSetupTools(setup: GameSetup, state: GmState, notify?: (ev:
         if (!genre || !protagonist) {
           throw new Error("genre 与 protagonist 均不能为空");
         }
-        setup.genre = genre;
-        setup.protagonist = protagonist;
+        setup.genre = rawGenre && rawGenre !== genre ? `${rawGenre}\n（扩充设定：${genre}）` : genre;
+        setup.protagonist =
+          rawProtagonist && rawProtagonist !== protagonist
+            ? `${rawProtagonist}（扩充设定：${protagonist}）`
+            : protagonist;
         return { ok: true };
       },
     },
