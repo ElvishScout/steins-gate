@@ -10,6 +10,6 @@ export interface DebugInfo {
 
 export type Entry =
   | { kind: "scene"; act: number; narration: string; options: string[]; debug: DebugInfo }
-  | { kind: "action"; text: string; by: "human" | "player-agent"; debug?: DebugInfo }
+  | { kind: "action"; text: string; debug?: DebugInfo }
   | { kind: "ending"; title: string; yearbook: string; debug: DebugInfo }
   | { kind: "error"; text: string };

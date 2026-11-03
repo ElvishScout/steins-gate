@@ -103,8 +103,6 @@ export interface GmState {
   barrier: number;
   checkpoints: Checkpoint[];
   contradictions: Contradiction[];
-  history: string[];
-  ending?: { tier: string; title: string } | null;
 }
 
 /** 场景边界：GM 递交选项、游戏挂起等待玩家行动时的快照。 */
@@ -132,7 +130,5 @@ export type GmDebugEvent =
       type: "tool";
       name: string;
       args: Record<string, unknown>;
-      /** 执行后的权威状态快照 */
-      state: GmState;
       error?: string;
     };

@@ -105,7 +105,7 @@ function previewOf(info: DebugInfo): string {
 }
 
 /** 一幕的幕后记录。默认收起（一行预览），手动展开。无内容时不渲染。 */
-export function DebugNote({ info }: { info: DebugInfo; live?: boolean }) {
+export function DebugNote({ info }: { info: DebugInfo }) {
   const [collapsed, setCollapsed] = useState(true);
   if (info.events.length === 0 && !info.state) return null;
 

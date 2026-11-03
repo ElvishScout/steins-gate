@@ -30,11 +30,6 @@ export function profileOf(difficulty: GameSetup["difficulty"]): DifficultyProfil
   return DIFFICULTY_PROFILE[difficulty];
 }
 
-/** 开局壁垒恒为 α 与 β 收束范围的分界线 1.000000%（原作「1% 壁垒」） */
-export function barrierOf(_difficulty?: GameSetup["difficulty"]): number {
-  return 1.0;
-}
-
 export type GmSkillId = "reading-steiner" | "fourth-wall" | "steins-gate" | "el-psy-kongroo";
 
 /**
@@ -154,7 +149,6 @@ export const GM_SKILLS: Record<GmSkillId, { name: string; when: string; content:
  * 避免与 system prompt 重复。
  */
 export function buildKickoffPrompt(setup: GameSetup, stateSnapshot: string, hasInitialCheckpoints = false): string {
-  const barrier = barrierOf(setup.difficulty);
   const profile = profileOf(setup.difficulty);
   const genreText = setup.genre?.trim() || "未指定";
   const protagonistText = setup.protagonist?.trim() || "未指定";
@@ -165,7 +159,7 @@ export function buildKickoffPrompt(setup: GameSetup, stateSnapshot: string, hasI
   return `${stateSnapshot}
 
 [本局设定]
-- 难度：${profile.label}（开局壁垒 = ${barrier.toFixed(6)}%）
+- 难度：${profile.label}（开局壁垒 = 1.000000%）
 - 主角设定：${protagonistText}
 - 题材与世界观：
 ${genreText}

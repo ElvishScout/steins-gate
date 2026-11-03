@@ -8,27 +8,26 @@ export interface AgentTool extends ToolSpec {
 }
 
 const MAX_TOOL_ROUNDS = 8;
-const noop = () => {};
 
 /**
  * 一个最小 agent：system prompt + 对话历史 + 回合推进。
  * 每次回合是一次（带 tools 的）流式补全 + 必要的工具结果回填循环。
  */
 export class Agent {
-  readonly name: string;
   /** 同一条对话上下文（整局 GM 或整局 Player）保持恒定的会话 ID，供 x-opencode-session 路由与缓存复用 */
   sessionId: string = crypto.randomUUID();
+  config: LLMConfig;
   history: ChatMessage[] = [];
 
-  constructor(config: LLMConfig, systemPrompt: string, name = "agent") {
+  constructor(config: LLMConfig, systemPrompt?: string) {
     this.config = config;
-    this.name = name;
-    this.history.push({ role: "system", content: systemPrompt });
+    if (systemPrompt) {
+      this.history.push({ role: "system", content: systemPrompt });
+    }
   }
-  config: LLMConfig;
 
   /**
-   * 推进一个回合：流式产出正文（onChunk 实时回调），若模型发出 tool_calls，
+   * 推进一个回合：流式产出正文（onText 实时回调），若模型发出 tool_calls，
    * 执行并回填结果后继续，直到模型不再调用工具为止。
    * 所有轮次的文本都会流出并拼进返回值：模型可能先调工具再写正文
    * （比如开局先 define_checkpoints），只取第一轮会吞掉正文。
@@ -38,7 +37,7 @@ export class Agent {
     userInput: string | null,
     opts?: {
       tools?: AgentTool[];
-      onChunk?: (delta: string) => void;
+      onText?: (delta: string) => void;
       /** 思维链增量（模型不吐 reasoning 时永不触发）；只进 UI，不回写历史 */
       onReasoning?: (delta: string) => void;
       signal?: AbortSignal;
@@ -49,13 +48,10 @@ export class Agent {
       /** 每个工具执行结果回填进 history 后触发 */
       onToolResult?: (name: string) => void;
     },
-  ): Promise<{ text: string; called: string[] }> {
+  ): Promise<string> {
     if (userInput !== null) {
       this.history.push({ role: "user", content: userInput });
     }
-    const onChunk = opts?.onChunk ?? noop;
-    const onReasoning = opts?.onReasoning ?? noop;
-    const called: string[] = [];
     let fullText = "";
 
     for (let round = 0; round < (opts?.maxRounds ?? MAX_TOOL_ROUNDS); round++) {
@@ -69,9 +65,9 @@ export class Agent {
       })) {
         if (ev.type === "text") {
           roundText += ev.delta;
-          onChunk(ev.delta);
+          opts?.onText?.(ev.delta);
         } else if (ev.type === "reasoning") {
-          onReasoning(ev.delta);
+          opts?.onReasoning?.(ev.delta);
         } else if (ev.type === "signature") {
           thoughtSignature = ev.signature;
         } else {
@@ -85,12 +81,10 @@ export class Agent {
         ...(toolCalls.length ? { toolCalls } : {}),
         ...(thoughtSignature ? { thoughtSignature } : {}),
       });
-      if (toolCalls.length === 0) return { text: fullText, called };
+      if (toolCalls.length === 0) return fullText;
 
       let hitTerminal = false;
-      for (let i = 0; i < toolCalls.length; i++) {
-        const tc = toolCalls[i];
-        called.push(tc.name);
+      for (const tc of toolCalls) {
         const tool = opts?.tools?.find((t) => t.name === tc.name);
         let result: string;
         if (!tool) {
@@ -111,9 +105,9 @@ export class Agent {
         this.history.push({ role: "tool", toolCallId: tc.id, content: result });
         opts?.onToolResult?.(tc.name);
       }
-      if (hitTerminal) return { text: fullText, called };
+      if (hitTerminal) return fullText;
     }
-    return { text: fullText, called };
+    return fullText;
   }
 
   /** 一步对话（玩家 agent、连接测试用）。底层走流式，正文/思维链可经回调实时取出。 */
@@ -125,37 +119,6 @@ export class Agent {
       onReasoning?: (delta: string) => void;
     },
   ): Promise<string> {
-    if (userInput !== null) {
-      this.history.push({ role: "user", content: userInput });
-    }
-    let text = "";
-    let thoughtSignature: string | undefined;
-    for await (const ev of streamTurn(this.config, this.history, {
-      signal: opts?.signal,
-      sessionId: this.sessionId,
-    })) {
-      if (ev.type === "text") {
-        text += ev.delta;
-        opts?.onText?.(ev.delta);
-      } else if (ev.type === "reasoning") {
-        opts?.onReasoning?.(ev.delta);
-      } else if (ev.type === "signature") {
-        thoughtSignature = ev.signature;
-      }
-    }
-    this.history.push({
-      role: "assistant",
-      content: text,
-      ...(thoughtSignature ? { thoughtSignature } : {}),
-    });
-    return text;
-  }
-
-  reset(systemPrompt?: string): void {
-    this.sessionId = crypto.randomUUID();
-    this.history = [];
-    if (systemPrompt !== undefined) {
-      this.history.push({ role: "system", content: systemPrompt });
-    }
+    return this.runTurn(userInput, opts);
   }
 }

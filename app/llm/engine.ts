@@ -2,7 +2,7 @@ import { Agent } from "./agent";
 import { createGmTools, freshInternals, snapshot, type GmInternals } from "./gm-tools";
 import { buildGmPrompt, buildKickoffPrompt } from "./prompts/gm";
 import { buildSetupPrompt, buildSetupUserMessage, createSetupTools } from "./prompts/setup";
-import type { Checkpoint, Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
+import type { ChatMessage, Checkpoint, Ending, GameSetup, GmDebugEvent, GmState, LLMConfig, Scene } from "./types";
 
 /** GM 整局跑在一条 agent 循环里，轮数上限要给足（每幕约 2~4 轮工具调用）。 */
 const GM_MAX_ROUNDS = 300;
@@ -11,12 +11,11 @@ const MAX_STALLS = 3;
 
 export interface EngineHooks {
   /** GM 正文的流式增量 */
-  onChunk: (delta: string) => void;
-  /**
-   * 场景边界：GM 已递交选项、游戏挂起。实现方负责展示选项并返回玩家行动文本——
-   * 人类玩家 = 等 UI 输入的 promise；观战模式 = 喂给玩家 agent。引擎不关心对面是谁。
-   */
-  onScene: (scene: Scene) => Promise<string>;
+  onText: (delta: string) => void;
+  /** 场景边界：GM 已产出正文并递交选项 */
+  onScene: (scene: Scene) => void;
+  /** 请求玩家对当前场景做出行动（人类玩家 = 等 UI 输入；观战模式 = 玩家 agent 生成） */
+  onAction: (scene: Scene) => Promise<string>;
   /** 终局（declare_ending 后调用，play 随即返回） */
   onEnding: (ending: Ending, state: GmState) => void;
   /** 调试事件流（思维链片段、工具调用；按真实发生顺序）。「展示隐藏状态」模式的数据来源 */
@@ -34,18 +33,16 @@ export class GameEngine {
   private internals: GmInternals = freshInternals("standard");
   private aborter: AbortController | null = null;
   private cancelInput: ((e: Error) => void) | null = null;
-  private stopInputWait: (() => void) | null = null;
   /** 当前幕正在累积的正文与结算需求标记（跨 retry 保存） */
   private sceneText = "";
   private needSettle = false;
   /** 最近一次稳定边界的快照，供请求失败/手动中断后重试恢复 */
   private checkpoint: {
     internals: GmInternals;
-    history: import("./types").ChatMessage[];
+    history: ChatMessage[];
     needSettle: boolean;
-    /** 若非空，说明快照停在 present_options 挂起等待玩家行动处（重试时需先注入玩家行动再推进 GM） */
-    pendingToolCallId?: string;
-    pendingOptions?: string[];
+    /** 若非空，说明快照停在 present_options 挂起等待玩家行动处（重试时需先获取玩家行动再推进 GM） */
+    pending?: { toolCallId: string; scene: Scene };
   } | null = null;
 
   constructor(private gmConfig: LLMConfig) {}
@@ -53,10 +50,6 @@ export class GameEngine {
   updateConfig(config: LLMConfig): void {
     this.gmConfig = config;
     if (this.gm) this.gm.config = config;
-  }
-
-  get state(): GmState {
-    return this.internals.state;
   }
 
   /** 当前局的设定（经开局 setup 子代理扩充后的版本） */
@@ -73,15 +66,8 @@ export class GameEngine {
     return this.aborter?.signal;
   }
 
-  /** 创建新的请求中止控制器，供重试阶段（含观战玩家补跑）使用 */
-  resetAbortController(): AbortSignal {
-    this.aborter = new AbortController();
-    return this.aborter.signal;
-  }
-
-  /** 是否存在等待玩家输入的挂起检查点（自己玩模式下等待玩家行动时被停止） */
-  get hasPendingInput(): boolean {
-    return Boolean(this.checkpoint?.pendingToolCallId);
+  get isEnded(): boolean {
+    return Boolean(this.internals.ending);
   }
 
   /** 是否存在可重试的未完成回合 */
@@ -89,30 +75,33 @@ export class GameEngine {
     return this.gm !== null && this.checkpoint !== null && !this.internals.ending;
   }
 
-  private saveCheckpoint(pending?: { toolCallId: string; options: string[] }): void {
+  private saveCheckpoint(pending?: { toolCallId: string; scene: Scene }): void {
     if (!this.gm) return;
     this.checkpoint = {
       internals: structuredClone(this.internals),
       history: structuredClone(this.gm.history),
       needSettle: this.needSettle,
-      ...(pending ? { pendingToolCallId: pending.toolCallId, pendingOptions: pending.options } : {}),
+      ...(pending ? { pending: structuredClone(pending) } : {}),
     };
   }
 
-  /** 当快照停在等待玩家行动处、且外部补齐了玩家行动时，将行动写入快照使之推进到 GM 下一幕起点 */
-  completePendingAction(action: string): void {
-    if (!this.checkpoint?.pendingToolCallId) return;
-    this.checkpoint.internals.options = this.checkpoint.pendingOptions ?? [];
-    this.checkpoint.internals.settledThisAct = false;
-    const result = `${snapshot(this.checkpoint.internals)}\n[玩家行动] ${action}`;
-    this.checkpoint.history.push({
-      role: "tool",
-      toolCallId: this.checkpoint.pendingToolCallId,
-      content: result,
+  private waitForAction(scene: Scene, hooks: EngineHooks): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      this.cancelInput = reject;
+      hooks.onAction(scene).then(
+        (action) => {
+          this.cancelInput = null;
+          this.needSettle = true;
+          resolve(action);
+        },
+        (e) => {
+          this.cancelInput = null;
+          const err = e instanceof Error ? e : new Error(String(e));
+          (err as { fatal?: boolean }).fatal = true;
+          reject(err);
+        },
+      );
     });
-    this.checkpoint.needSettle = true;
-    delete this.checkpoint.pendingToolCallId;
-    delete this.checkpoint.pendingOptions;
   }
 
   async play(setup: GameSetup, hooks: EngineHooks, initialCheckpoints?: Checkpoint[]): Promise<void> {
@@ -120,7 +109,7 @@ export class GameEngine {
     this.internals = freshInternals(setup.difficulty, initialCheckpoints);
     this.sceneText = "";
     this.needSettle = false;
-    this.gm = new Agent(this.gmConfig, buildGmPrompt(this.setup), "gm");
+    this.gm = new Agent(this.gmConfig, buildGmPrompt(this.setup));
     if (initialCheckpoints && initialCheckpoints.length > 0) {
       this.gm.history.push({
         role: "user",
@@ -131,7 +120,7 @@ export class GameEngine {
     await this.runLoop(hooks);
   }
 
-  /** 从最近一次稳定边界恢复状态并重新发起 GM 回合 */
+  /** 从最近一次稳定边界恢复状态并重新发起未完成的回合 */
   async retry(hooks: EngineHooks): Promise<void> {
     if (!this.gm || !this.checkpoint) return;
     this.aborter = new AbortController();
@@ -156,13 +145,13 @@ export class GameEngine {
     const readyToNarrate = () =>
       (!this.needSettle || this.internals.settledThisAct) &&
       (this.internals.actsThisLine > 0 || this.internals.state.checkpoints.some((c) => c.status === "pending"));
-    const onChunk = (d: string) => {
+    const onText = (d: string) => {
       if (!readyToNarrate()) {
         hooks.onDebug?.({ type: "reasoning", text: d });
         return;
       }
       this.sceneText += d;
-      hooks.onChunk(d);
+      hooks.onText(d);
     };
 
     const tools = createGmTools(
@@ -172,40 +161,26 @@ export class GameEngine {
         if (!this.sceneText.trim()) {
           throw new Error("本幕还没有叙事正文：先输出正文（会流式展示给玩家），再递交选项。玩家只能通过正文了解故事。");
         }
-        return new Promise<string>((resolve, reject) => {
-          this.cancelInput = reject;
-          const scene: Scene = {
-            act: this.internals.state.act,
-            narration: this.sceneText.trim(),
-            options,
-            state: structuredClone(this.internals.state),
-          };
-          this.sceneText = "";
-          const optsList = options.map(String);
-          // 场景正文与选项已校验通过并即将展示给用户：先保存场景边界快照，
-          // 若在等待玩家（或观战玩家 agent）行动期间被停止，重试时可保留本幕而不必重跑本幕 GM
-          const lastMsg = this.gm?.history[this.gm.history.length - 1];
-          const tcId =
-            lastMsg?.role === "assistant"
-              ? lastMsg.toolCalls?.find((tc) => tc.name === "present_options")?.id
-              : undefined;
-          if (tcId) {
-            this.saveCheckpoint({ toolCallId: tcId, options: optsList });
-          }
-          hooks.onScene(scene).then(
-            (action) => {
-              this.cancelInput = null;
-              this.needSettle = true;
-              resolve(action);
-            },
-            (e) => {
-              this.cancelInput = null;
-              const err = e instanceof Error ? e : new Error(String(e));
-              (err as { fatal?: boolean }).fatal = true;
-              reject(err);
-            },
-          );
-        });
+        // 工具事件在挂起前发出：挂起即场景边界，之后发出会错位到下一幕的附注
+        hooks.onDebug?.({ type: "tool", name: "present_options", args: { options } });
+        const scene: Scene = {
+          act: this.internals.state.act,
+          narration: this.sceneText.trim(),
+          options,
+          state: structuredClone(this.internals.state),
+        };
+        this.sceneText = "";
+        hooks.onScene(scene);
+        // 场景已展示给用户：保存场景边界快照，若在等待玩家（或观战玩家 agent）行动期间被停止，重试时不必重跑本幕 GM
+        const lastMsg = this.gm?.history[this.gm.history.length - 1];
+        const tcId =
+          lastMsg?.role === "assistant"
+            ? lastMsg.toolCalls?.find((tc) => tc.name === "present_options")?.id
+            : undefined;
+        if (tcId) {
+          this.saveCheckpoint({ toolCallId: tcId, scene });
+        }
+        return this.waitForAction(scene, hooks);
       },
       hooks.onDebug,
     );
@@ -213,11 +188,11 @@ export class GameEngine {
     let input: string | null = null;
     try {
       // 开局尚未注入首条 user 消息时，先由轻量 setup agent 按需调 roll_inspiration 并通过 submit_setup 工具写回设定
-      if (this.gm.history.length === 1) {
-        const setupAgent = new Agent(this.gmConfig, buildSetupPrompt(), "setup");
+      if (!this.gm.history.some((message) => message.role === "user")) {
+        const setupAgent = new Agent(this.gmConfig, buildSetupPrompt());
         await setupAgent.runTurn(buildSetupUserMessage(this.setup), {
-          tools: createSetupTools(this.setup, this.internals.state, hooks.onDebug),
-          onChunk: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
+          tools: createSetupTools(this.setup, hooks.onDebug),
+          onText: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
           onReasoning: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
           signal,
           terminal: ["submit_setup"],
@@ -229,11 +204,26 @@ export class GameEngine {
         this.saveCheckpoint();
       }
 
+      // 若从等待玩家行动的检查点恢复（重试），先补完玩家行动并写入 tool 结果，再推进 GM
+      if (this.checkpoint?.pending) {
+        const { toolCallId, scene } = this.checkpoint.pending;
+        const action = await this.waitForAction(scene, hooks);
+        this.internals.options = scene.options;
+        this.internals.settledThisAct = false;
+        this.internals.definedCheckpointsThisAct = false;
+        this.gm.history.push({
+          role: "tool",
+          toolCallId,
+          content: `${snapshot(this.internals)}\n[玩家行动] ${action}`,
+        });
+        this.saveCheckpoint();
+      }
+
       for (let stalls = 0; !this.internals.ending;) {
         this.internals.options = null;
         await this.gm.runTurn(input, {
           tools,
-          onChunk,
+          onText,
           onReasoning: (d) => hooks.onDebug?.({ type: "reasoning", text: d }),
           signal,
           maxRounds: GM_MAX_ROUNDS,
@@ -269,12 +259,7 @@ export class GameEngine {
   }
 
   stop(): void {
-    this.stopInputWait?.();
     this.cancelInput?.(new Error("已停止"));
     this.aborter?.abort();
-  }
-
-  onStopInputWait(fn: (() => void) | null): void {
-    this.stopInputWait = fn;
   }
 }

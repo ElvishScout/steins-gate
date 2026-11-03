@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
+import type { GmDebugEvent } from "../llm/types";
 import { DebugNote } from "./DebugNote";
 import type { Entry } from "./entries";
 
 /** 生成中的流式内容：GM 的正文 + 附注事件流，或玩家 agent 的行动 + 思维链 */
 export interface LiveGM {
   narration: string;
-  events: import("../llm/types").GmDebugEvent[];
+  events: GmDebugEvent[];
 }
 export interface LivePlayer {
   text: string;
@@ -135,7 +136,7 @@ export function StoryLog(props: {
       {props.live && (
         <article className="rounded-xl border border-line bg-card px-4 py-3 shadow-2xs">
           {props.showHidden && props.live.events.length > 0 && (
-            <DebugNote live={props.busy} info={{ events: props.live.events, state: null }} />
+            <DebugNote info={{ events: props.live.events, state: null }} />
           )}
           <div className="font-serif text-[15.5px] leading-[1.75] whitespace-pre-wrap text-ink">
             {props.live.narration}
@@ -148,7 +149,6 @@ export function StoryLog(props: {
         <div>
           {props.showHidden && props.playerLive.reasoning && (
             <DebugNote
-              live={props.busy}
               info={{
                 events: [{ type: "reasoning", text: props.playerLive.reasoning }],
                 state: null,

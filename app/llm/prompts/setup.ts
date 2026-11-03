@@ -1,5 +1,5 @@
 import type { AgentTool } from "../agent";
-import type { GameSetup, GmDebugEvent, GmState } from "../types";
+import type { GameSetup, GmDebugEvent } from "../types";
 
 /** 题材词库：宽泛、开放的故事类型与领域，留出充分的创作空间 */
 // prettier-ignore
@@ -55,7 +55,7 @@ export function rollInspiration() {
 }
 
 /** 构造开局设定子代理的工具集：roll_inspiration + submit_setup */
-export function createSetupTools(setup: GameSetup, state: GmState, notify?: (ev: GmDebugEvent) => void): AgentTool[] {
+export function createSetupTools(setup: GameSetup, notify?: (ev: GmDebugEvent) => void): AgentTool[] {
   const rawGenre = setup.genre?.trim() ?? "";
   const rawProtagonist = setup.protagonist?.trim() ?? "";
 
@@ -66,22 +66,13 @@ export function createSetupTools(setup: GameSetup, state: GmState, notify?: (ev:
       async run(args) {
         try {
           const result = await tool.run(args);
-          notify({
-            type: "tool",
-            name: tool.name,
-            args:
-              tool.name === "roll_inspiration" && result && typeof result === "object"
-                ? (result as Record<string, unknown>)
-                : args,
-            state: structuredClone(state),
-          });
+          notify({ type: "tool", name: tool.name, args });
           return result;
         } catch (e) {
           notify({
             type: "tool",
             name: tool.name,
             args,
-            state: structuredClone(state),
             error: e instanceof Error ? e.message : String(e),
           });
           throw e;

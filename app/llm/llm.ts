@@ -9,28 +9,10 @@ import {
   type StreamEvent,
   type ToolSpec,
 } from "./protocols/shared";
-import type { ChatMessage, LLMConfig, ToolCall } from "./types";
+import type { ChatMessage, LLMConfig } from "./types";
 
 export { LLMError };
 export type { CallOptions, StreamEvent, ToolSpec };
-
-/** 非流式语义的调用（玩家 agent、连接测试用）——底层同样走流式，攒齐后一次性返回。 */
-export async function chat(
-  config: LLMConfig,
-  messages: ChatMessage[],
-  opts?: CallOptions & { tools?: ToolSpec[] },
-): Promise<{ content: string | null; toolCalls: ToolCall[]; reasoning: string }> {
-  let content = "";
-  let reasoning = "";
-  let toolCalls: ToolCall[] = [];
-  const sessionId = opts?.sessionId ?? crypto.randomUUID();
-  for await (const ev of streamTurn(config, messages, { ...opts, sessionId })) {
-    if (ev.type === "text") content += ev.delta;
-    else if (ev.type === "reasoning") reasoning += ev.delta;
-    else if (ev.type === "tool_calls") toolCalls = ev.toolCalls;
-  }
-  return { content: content || null, toolCalls, reasoning };
-}
 
 /**
  * 流式调用：按 config.protocol 选择适配器。所有协议共享同一套

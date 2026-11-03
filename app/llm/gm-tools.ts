@@ -1,6 +1,14 @@
 import type { AgentTool } from "./agent";
-import { barrierOf, GM_SKILLS, profileOf, type GmSkillId } from "./prompts/gm";
-import type { Checkpoint, Contradiction, ContradictionMagnitude, Difficulty, GmDebugEvent, GmState } from "./types";
+import { GM_SKILLS, profileOf, type GmSkillId } from "./prompts/gm";
+import type {
+  Checkpoint,
+  Contradiction,
+  ContradictionMagnitude,
+  Difficulty,
+  Ending,
+  GmDebugEvent,
+  GmState,
+} from "./types";
 
 /** 矛盾量级档位 → 合法幅度区间（百分点，取绝对值）。restorative 为负方向。 */
 const TIER_RANGES: Record<string, [number, number]> = {
@@ -77,15 +85,18 @@ export interface GmInternals {
   /** present_options 捕获的本幕选项 */
   options: string[] | null;
   /** declare_ending 捕获的结局 */
-  ending: { tier: string; title: string; yearbook: string } | null;
+  ending: Ending | null;
 }
 
 export function freshInternals(difficulty: Difficulty = "standard", initialCheckpoints?: Checkpoint[]): GmInternals {
   const profile = profileOf(difficulty);
   const [minDiv, maxDiv] = profile.initialRange;
   const initialDiv = round6(minDiv + Math.random() * (maxDiv - minDiv));
-  const presetCps: Checkpoint[] = (initialCheckpoints ?? []).map(({ note: _, ...c }) => ({
-    ...structuredClone(c),
+  const presetCps: Checkpoint[] = structuredClone(initialCheckpoints ?? []).map((c) => ({
+    id: c.id,
+    content: c.content,
+    upstream: c.upstream,
+    conditions: c.conditions,
     status: "pending" as const,
   }));
   return {
@@ -94,11 +105,9 @@ export function freshInternals(difficulty: Difficulty = "standard", initialCheck
       worldline: "α",
       // 初始读数：按难度落在 α 线不同深浅区间（如标准难度对应 0.571024% 附近，残酷对应 0.337187% 深渊）
       divergence: initialDiv,
-      barrier: barrierOf(difficulty),
+      barrier: 1,
       checkpoints: presetCps,
       contradictions: [],
-      history: [],
-      ending: null,
     },
     fragileRatio: profile.fragileRatio,
     loadedSkills: new Set(),
@@ -179,7 +188,7 @@ export function createGmTools(
   /** 调试事件出口（「展示隐藏状态」模式）：每次工具执行后发出，带执行后状态快照 */
   notify?: (ev: GmDebugEvent) => void,
 ): AgentTool[] {
-  /** 包装工具：执行成功/报错后向 UI 发出工具事件。present_options 的成功事件在挂起前手动发出（挂起即场景边界）。 */
+  /** 包装工具：执行成功/报错后向 UI 发出工具事件。present_options 的成功事件在挂起前由 requestInput 发出。 */
   const withNotify = (tool: AgentTool): AgentTool => {
     if (!notify) return tool;
     return {
@@ -188,17 +197,18 @@ export function createGmTools(
         try {
           const result = await tool.run(args);
           if (tool.name !== "present_options") {
-            notify({ type: "tool", name: tool.name, args, state: structuredClone(gm.state) });
+            notify({ type: "tool", name: tool.name, args });
           }
           return result;
         } catch (e) {
-          notify({
-            type: "tool",
-            name: tool.name,
-            args,
-            state: structuredClone(gm.state),
-            error: e instanceof Error ? e.message : String(e),
-          });
+          if (!(e instanceof Error && (e as { fatal?: boolean }).fatal)) {
+            notify({
+              type: "tool",
+              name: tool.name,
+              args,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
           throw e;
         }
       },
@@ -287,9 +297,6 @@ export function createGmTools(
         s.act += 1;
         gm.actsThisLine += 1;
         gm.settledThisAct = true;
-        s.history.push(
-          `第${s.act}幕结算：${str(args.summary, "summary")}（${tier} ${signed >= 0 ? "+" : ""}${round6(signed)}% → ${next.toFixed(6)}%）${entry ? `｜记矛盾 ${entry.id}[${MAGNITUDE_LABEL[entry.magnitude]}]` : ""}${typeof args.note === "string" ? `｜${args.note}` : ""}`,
-        );
         const jr = jumpReadiness(s, gm.fragileRatio);
         const pacing = pacingNote(gm);
         return {
@@ -535,9 +542,6 @@ export function createGmTools(
         s.divergence = round6(d);
         gm.actsThisLine = 0; // 新收束范围重新开始计幕
         for (const cp of s.checkpoints) if (cp.status === "pending") cp.status = "void";
-        s.history.push(
-          `⚡ 跃迁至 ${s.worldline} 线（读数 ${s.divergence.toFixed(6)}%），旧检查点作废，新壁垒 ${s.barrier.toFixed(6)}%${typeof args.note === "string" ? `｜${args.note}` : ""}`,
-        );
         return {
           ok: true,
           worldline: s.worldline,
@@ -584,15 +588,9 @@ export function createGmTools(
         }
         // 全部校验通过、且玩家已行动之后，才允许改状态——
         // requestInput 抛错（如本幕无正文、玩家中止）时不能留下半变更的死锁状态
-        // 工具事件在挂起前发出：挂起即场景边界，之后发出会错位到下一幕的附注
-        notify?.({
-          type: "tool",
-          name: "present_options",
-          args,
-          state: structuredClone(gm.state),
-        });
-        const action = await requestInput(opts.map(String));
-        gm.options = opts.map(String);
+        const options = opts.map(String);
+        const action = await requestInput(options);
+        gm.options = options;
         gm.settledThisAct = false;
         gm.definedCheckpointsThisAct = false;
         return `${snapshot(gm)}\n[玩家行动] ${action}`;
